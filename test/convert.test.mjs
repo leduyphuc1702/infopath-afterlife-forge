@@ -33,6 +33,8 @@ for (const file of names) {
       assert.ok(q.label.length > 0 && q.label.length <= 255, 'label');
       assert.equal(typeof q.validation.rq, 'boolean');
       if (q.choices) assert.equal(new Set(q.choices.map((c) => c.id)).size, q.choices.length);
+      // A required question with one box would force every customer to tick it.
+      if (q.type === 'cm' && q.choices.length === 1) assert.equal(q.validation.rq, false, `${q.label}: a single check box is never required`);
       for (const id of q.defaultAnswer?.choices ?? []) assert.ok(q.choices.some((c) => c.id === id));
     }
     assert.equal(out.stats.converted + out.stats.simplified + out.stats.skipped, out.map.length);

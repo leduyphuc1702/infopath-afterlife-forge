@@ -224,7 +224,7 @@ function Create({ form, desks, onCreated }) {
             <p>{plural(result.questions, 'question')} created{result.requestTypeName ? `, shown in the portal on “${result.requestTypeName}”` : ''}.</p>
             <p className="actions">
               <button className="link" onClick={() => open(result.formsPage)}>Open the project’s forms</button>
-              {result.portalId && <button className="link" onClick={() => open(`/servicedesk/customer/portal/${result.portalId}/group/-1/create/${result.requestTypeId}`)}>Open it in the portal</button>}
+              {result.portalId && <button className="link" onClick={() => open(`/servicedesk/customer/portal/${result.portalId}/create/${result.requestTypeId}`)}>Open it in the portal</button>}
             </p>
           </div>
         )}
