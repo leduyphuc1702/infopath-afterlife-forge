@@ -1,0 +1,119 @@
+modules:
+  jira:adminPage:
+    - key: afterlife-admin
+      resource: admin
+      resolver:
+        function: resolver
+      title: InfoPath Afterlife
+      icon: resource:admin;icon.svg
+
+  rovo:agent:
+    - key: afterlife-agent
+      name: InfoPath Afterlife
+      description: Knows every InfoPath form this site still has to move to Jira
+        Service Management, what stops each one from working, and can create the
+        JSM form.
+      icon: resource:admin;icon.svg
+      prompt: resource:prompts;agent.md
+      conversationStarters:
+        - Which InfoPath forms should we migrate first?
+        - What stops the Expense Report form from working?
+        - Create the JSM form for Leave Request in project HR
+      actions:
+        - list-legacy-forms
+        - get-legacy-form
+        - create-jsm-form
+      skills:
+        - infopath-migration-plan
+
+  rovo:skill:
+    - key: infopath-migration-plan
+      source:
+        dir: skills/infopath-migration-plan
+      dependencies:
+        tools:
+          - list-legacy-forms
+          - get-legacy-form
+          - create-jsm-form
+
+  rovo:mcp:
+    - key: afterlife-mcp
+      name: InfoPath Afterlife
+      tools:
+        - list-legacy-forms
+        - get-legacy-form
+        - create-jsm-form
+
+  action:
+    - key: list-legacy-forms
+      name: list-legacy-forms
+      function: list-legacy-forms-fn
+      actionVerb: GET
+      description: Lists every analysed InfoPath form with its migration wave, size,
+        causes of death and whether a JSM form was already created. Use it for
+        questions about the migration plan or the order of work.
+    - key: get-legacy-form
+      name: get-legacy-form
+      function: get-legacy-form-fn
+      actionVerb: GET
+      description: Returns the death certificate and the field-by-field conversion map
+        of one InfoPath form. Use it for questions about a single form, its
+        fields, rules, data connections or what needs manual work.
+      inputs:
+        form:
+          title: Form
+          type: string
+          required: true
+          description: The name of the InfoPath form, or part of it, for example "Expense
+            Report".
+    - key: create-jsm-form
+      name: create-jsm-form
+      function: create-jsm-form-fn
+      actionVerb: CREATE
+      description: Creates the Jira Service Management form for one analysed InfoPath
+        form in a service project. Only when the user asks to create or convert
+        a form and names the project.
+      inputs:
+        form:
+          title: Form
+          type: string
+          required: true
+          description: The name of the InfoPath form to convert.
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: The key of the service project that receives the form, for example
+            "HR".
+
+  function:
+    - key: resolver
+      handler: index.handler
+    - key: list-legacy-forms-fn
+      handler: index.listLegacyForms
+    - key: get-legacy-form-fn
+      handler: index.getLegacyForm
+    - key: create-jsm-form-fn
+      handler: index.createJsmFormAction
+
+resources:
+  - key: admin
+    path: static/admin
+  - key: prompts
+    path: prompts
+
+permissions:
+  scopes:
+    - storage:app
+    - read:jira-work
+    - read:jira-user
+    - read:servicedesk-request
+    - manage:jira-project
+  content:
+    styles:
+      - unsafe-inline
+
+app:
+  runtime:
+    name: nodejs22.x
+  id: ari:cloud:ecosystem::app/75ddeb29-1546-423b-a084-86dca835517f
