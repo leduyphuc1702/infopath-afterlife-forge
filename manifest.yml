@@ -18,10 +18,11 @@ modules:
       conversationStarters:
         - Which InfoPath forms should we migrate first?
         - What stops the Expense Report form from working?
-        - Create the JSM form for Leave Request in project HR
+        - Create the JSM form for Leave Request
       actions:
         - list-legacy-forms
         - get-legacy-form
+        - list-service-projects
         - create-jsm-form
       skills:
         - infopath-migration-plan
@@ -34,6 +35,7 @@ modules:
         tools:
           - list-legacy-forms
           - get-legacy-form
+          - list-service-projects
           - create-jsm-form
 
   rovo:mcp:
@@ -42,6 +44,7 @@ modules:
       tools:
         - list-legacy-forms
         - get-legacy-form
+        - list-service-projects
         - create-jsm-form
 
   action:
@@ -66,13 +69,20 @@ modules:
           required: true
           description: The name of the InfoPath form, or part of it, for example "Expense
             Report".
+    - key: list-service-projects
+      name: list-service-projects
+      function: service-projects-fn
+      actionVerb: GET
+      description: Lists the service projects the person asking administers, which are
+        the only ones they can add a form to. Use it before creating a form
+        when the user has not named the project.
     - key: create-jsm-form
       name: create-jsm-form
       function: create-jsm-form-fn
       actionVerb: CREATE
       description: Creates the Jira Service Management form for one analysed InfoPath
         form in a service project. Only when the user asks to create or convert
-        a form and names the project.
+        a form and has chosen the project.
       inputs:
         form:
           title: Form
@@ -83,8 +93,8 @@ modules:
           title: Project key
           type: string
           required: true
-          description: The key of the service project that receives the form, for example
-            "HR".
+          description: The key of the service project that receives the form, as returned
+            by list-service-projects, for example "HR".
 
   function:
     - key: resolver
@@ -95,6 +105,8 @@ modules:
       handler: index.getLegacyForm
     - key: create-jsm-form-fn
       handler: index.createJsmFormAction
+    - key: service-projects-fn
+      handler: index.listServiceProjects
 
 resources:
   - key: admin

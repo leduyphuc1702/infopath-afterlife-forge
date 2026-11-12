@@ -42,7 +42,9 @@ for (const file of names) {
     assert.deepEqual((await convert(file)).out.design, out.design);
     const row = (await core.triageFiles([{ name: file, bytes: new Uint8Array(readFileSync(`${all}/${file}`)) }])).rows[0];
     const record = summarise(row, ir, out, '2026-01-01T00:00:00Z');
-    assert.ok(JSON.stringify(record).length < 240 * 1024, 'fits one storage value');
+    const { design, ...detail } = record;
+    for (const value of [design, detail])
+      assert.ok(new TextEncoder().encode(JSON.stringify(value)).length < 240 * 1024, 'fits one storage value');
   });
 }
 

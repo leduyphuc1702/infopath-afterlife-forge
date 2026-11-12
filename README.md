@@ -23,6 +23,10 @@ what to move first cannot open it without the product that just ended.
 
 ## What the app does
 
+The admin page has three steps, shown at the top until the first form is created: **Add**
+templates, **Open** a form, **Create** the JSM form. Explanations sit behind a help icon next
+to each heading, so the page stays short.
+
 1. **Reads the templates.** A Jira admin drops `.xsn` files on the app's page in Jira
    settings. Each file is read in the admin's browser. Nothing is uploaded.
 2. **Builds the migration plan.** Every form gets a wave:
@@ -37,8 +41,9 @@ what to move first cannot open it without the product that just ended.
    service project and, if the admin picks a request type, shows it in the customer portal.
    A field map shows what happened to every InfoPath control, and a "Needs your attention"
    list names what a person still has to finish.
-5. **Gives Rovo the context.** A Rovo agent, a Rovo skill and an MCP server share three
-   actions that return the plan, one form's analysis, and create a form. Someone who never
+5. **Gives Rovo the context.** A Rovo agent, a Rovo skill and an MCP server share four
+   actions: the plan, one form's analysis, the service projects the person asking administers,
+   and creating a form. Someone who never
    saw InfoPath can ask "Which forms should we migrate first?" or "What stops the Expense
    Report form from working?" and get an answer taken from the analysis, not from guesses.
 
@@ -63,15 +68,16 @@ All numbers come from the scripts in this repository or from calls to a real Jir
 | Controls simplified (the field map says how) | 90 |
 | Controls not converted (an ActiveX control) | 1 |
 | A converted form published to a portal request type, then read back | worked |
-| Backend run inside the Forge runtime: save 11 forms, list, read, three actions, remove | worked |
+| Admin page used inside Jira: 11 sample forms added, a form opened, its JSM form created, the form shown in the customer portal | worked |
+| Rovo agent used in Rovo Chat inside Jira: the plan, one form, and creating a form after Rovo's confirm step | worked |
 | Outbound network calls made by the app | none: the deployed version is eligible for Runs on Atlassian |
 
 The 47 sample templates were written for this project and are MIT licensed. Eleven of them
 ship with the app so anyone can try it without owning an InfoPath form.
 
-One thing is **not yet measured**: the admin page and the Rovo agent were exercised against
-the real backend and the real Forms API, but through test calls, not yet by clicking through
-them inside Jira. See "Limits".
+Some things are **not yet tried on a real site**: connecting an outside MCP client, a person
+who does not administer the project asking Rovo to create a form, the "Jira administrators
+only" setting, and the dark theme. See "Limits".
 
 ## How it works
 
@@ -84,7 +90,8 @@ them inside Jira. See "Limits".
  │   → lib/convert: JSM form design          │   │ Forge key-value store │   └───────────┘
  │   → lib/summary: one record per form      │   │   form:<id>           │
  └───────────────────────────────────────────┘   │ Rovo actions          │◀── Rovo agent,
-                                                 │   list / get / create │    skill, MCP
+                                                 │   list, get, create,  │    skill, MCP
+                                                 │   service projects    │
                                                  └───────────────────────┘
 ```
 
@@ -95,7 +102,9 @@ them inside Jira. See "Limits".
 - `lib/convert.mjs` maps the default view's controls to JSM form questions. It is pure: no
   DOM, no Forge, no network, and the same template always gives the same design.
 - `lib/summary.mjs` builds the record the app keeps about one form.
-- `src/index.js` is the backend: storage, the Forms API call, and the three Rovo actions.
+- `src/plan.mjs` is the backend: storage, the Forms API calls and the four Rovo actions. It
+  takes Forge as a parameter, so the tests run it against a stand-in (`lib/fake-forge.mjs`).
+  `src/index.js` only wires it to the real Forge modules.
 - `ui/` is the admin page (React, Atlassian design tokens, follows the Jira theme).
 - `prompts/agent.md` and `skills/infopath-migration-plan/SKILL.md` tell Rovo how to use the
   actions.
@@ -132,6 +141,8 @@ signatures.
 - Filled `.xml` records are matched to their template and counted. Their content is not saved.
 - Creating a form needs the person asking to administer the target project. The app checks
   this as the user, and refuses when Jira cannot say who is asking.
+- An admin chooses who may ask Rovo about the forms: everyone who can use Rovo (the default),
+  or Jira administrators only.
 
 ## Install and try
 
@@ -150,9 +161,10 @@ forms**.
 
 ## Limits
 
-- **Not yet clicked through inside Jira.** The backend, the storage, the actions and the Forms
-  API calls were run for real. The admin page was tested in a local preview with a stand-in
-  for Jira. The first run inside Jira may still show layout or permission details to fix.
+- **Not yet tried on a real site:** the MCP server from an outside client (a site admin has to
+  switch the tools on first), a create request from a person who does not administer the
+  project, the "Jira administrators only" setting, and the dark theme. The refusal and the
+  setting are covered by tests against a stand-in for Forge, not by a run in Jira.
 - JSM forms have no repeating rows, no calculations and no rule actions, so those parts are
   simplified, and the app says so for each field instead of hiding it.
 - The app attaches a form to an existing request type. It does not create request types: Jira
@@ -166,7 +178,7 @@ forms**.
 
 | Command | What it does |
 |---|---|
-| `npm test` | Converts every sample template and checks the design (13 tests) |
+| `npm test` | 50 tests: every sample template converts to a well-formed design; file intake; analysis; the page's calls; the backend and the four actions against a stand-in for Forge |
 | `AFTERLIFE_SAMPLES=<dir> npm test` | The same over any folder of `.xsn` files |
 | `npm run dev` | Admin page at `http://127.0.0.1:4340` with an in-memory stand-in for Jira |
 | `npm run build` | Builds the admin page into `static/admin` |

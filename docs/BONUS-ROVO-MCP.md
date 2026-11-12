@@ -3,15 +3,16 @@
 ## What was built
 
 One `rovo:mcp` module, key `afterlife-mcp`, named "InfoPath Afterlife". It exposes the app's
-three actions as MCP tools:
+four actions as MCP tools:
 
 | Tool | Inputs | Result |
 |---|---|---|
 | `list-legacy-forms` | none | The migration plan: totals per wave, and one entry per analysed InfoPath form |
 | `get-legacy-form` | `form` (name or part of it) | Causes of death with evidence, conversion counts, the attention list and the field map |
+| `list-service-projects` | none | The service projects the person asking administers |
 | `create-jsm-form` | `form`, `projectKey` | Creates the JSM form in that service project and returns where it is and what still needs a person |
 
-The Rovo agent in this app uses the same three actions, so a person in Rovo Chat and a client
+The Rovo agent in this app uses the same four actions, so a person in Rovo Chat and a client
 over MCP get the same answers from the same code.
 
 `skills/infopath-migration-plan/SKILL.md` describes how to use the tools: how to order a
@@ -47,7 +48,7 @@ events its code-behind handled, and on which fields, straight from `get-legacy-f
 
 ## What was verified
 
-The three handlers behind the tools were run inside the Forge runtime on a real site (see the
+The four handlers behind the tools were used on a real site through the Rovo agent (see the
 agent write-up for the results). The manifest passes `forge lint` and deploys.
 
 Connecting an external MCP client has not been done yet: it needs a site admin to switch the

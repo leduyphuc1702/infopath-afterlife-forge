@@ -1,7 +1,7 @@
 // Builds the admin page into static/admin (what Forge uploads).
 // `node scripts/build.mjs --dev` builds it with the stand-in for Jira and serves it on :4340.
 import { build, context } from 'esbuild';
-import { copyFileSync } from 'node:fs';
+import { copyFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -18,7 +18,11 @@ const options = {
   jsx: 'automatic',
   outdir,
   loader: { '.css': 'css' },
-  define: { DEV_STANDIN: String(dev), 'process.env.NODE_ENV': dev ? '"development"' : '"production"' },
+  define: {
+    DEV_STANDIN: String(dev),
+    APP_VERSION: JSON.stringify(JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version),
+    'process.env.NODE_ENV': dev ? '"development"' : '"production"',
+  },
   logLevel: 'info',
 };
 
