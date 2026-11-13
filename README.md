@@ -146,7 +146,16 @@ signatures.
 
 ## Install and try
 
-Full steps are in [docs/SETUP.md](docs/SETUP.md). In short:
+**Install the app as it is.** Open this link as an admin of a Jira Cloud site that has Jira
+Service Management, choose the site, and accept the five permissions:
+
+**[Install InfoPath Afterlife on your Jira site](https://developer.atlassian.com/console/install/75ddeb29-1546-423b-a084-86dca835517f?signature=AYABeGs1dV00HXZAHEH0Dlv24d4AAAADAAdhd3Mta21zAEthcm46YXdzOmttczp1cy13ZXN0LTI6NzA5NTg3ODM1MjQzOmtleS83MDVlZDY3MC1mNTdjLTQxYjUtOWY5Yi1lM2YyZGNjMTQ2ZTcAuAECAQB4CxqLTo9l4lqXuFjNim1xJM%2Bp%2F3TVP9xHS2BrU5DRRucBRyg4QOhk9%2FSyBqi526mjUgAAAH4wfAYJKoZIhvcNAQcGoG8wbQIBADBoBgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDKJ0OyYfwPxVylkIwgIBEIA7AJnUcb8TCShlnHjZp7jsODOraW7%2FVliqYLhm0SsAdVg7IYoa4QoK5OhOV3VwQdoN88y7%2BI0hICCApT0AB2F3cy1rbXMAS2Fybjphd3M6a21zOmV1LXdlc3QtMTo3MDk1ODc4MzUyNDM6a2V5LzQ2MzBjZTZiLTAwYzMtNGRlMi04NzdiLTYyN2UyMDYwZTVjYwC4AQICAHi9bVMAkme4qVQX1fQHo6ePw3H40A7cGfz7yrmSfBWMXgGaXZSlaqK0c512dK39m0vMAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMKm5E%2FNOmT7G3xgBZAgEQgDslrxwT0IJOX9UVmrUdIXu76%2BM3M8i9f8J27zAszQ6Tq0b3JbVpyeBjB%2BArc5edVxKLaCAr4zUSllGtaAAHYXdzLWttcwBLYXJuOmF3czprbXM6dXMtZWFzdC0xOjcwOTU4NzgzNTI0MzprZXkvNmMxMjBiYTAtNGNkNS00OTg1LWI4MmUtNDBhMDQ5NTJjYzU3ALgBAgIAeDYASx0XCjkny4iLV6vz%2BKtEGSGT6kdt0QRpkn6D%2FlVEAVPOkOHiRPtx3v8qu8xw0OIAAAB%2BMHwGCSqGSIb3DQEHBqBvMG0CAQAwaAYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAzjWvckmi1qfL8Tej0CARCAO0cCbX8EdUFav4sq%2BxVXRtSWfmetYK5jTkqTzGoy2BOnF%2BDqt1p1pS%2Bg4zyOe5AiemmHEuv%2FoQoUaaRhAgAAAAAMAAAQAAAAAAAAAAAAAAAAABN3reOpzQYyiQdljYfMlDD%2F%2F%2F%2F%2FAAAAAQAAAAAAAAAAAAAAAQAAADLw8g3sWYWZ%2BgIv17Zm6bH7YRiOOUXyIg9Jk6U3I8QE9NTPAmL82nSACM7u1iS3ZIDGjtZPILI555Pz%2FvRjbi2noqs%3D&product=jira)**
+
+Then open Jira → Settings → Apps → **InfoPath Afterlife** and press **Try the 11 sample
+forms**.
+
+**Or run your own copy from this source.** Full steps are in [docs/SETUP.md](docs/SETUP.md).
+In short:
 
 ```
 npm install
@@ -156,8 +165,7 @@ forge deploy
 forge install --product jira
 ```
 
-Then open Jira → Settings → Apps → **InfoPath Afterlife** and press **Try the 11 sample
-forms**.
+The app then appears in the same place: Jira → Settings → Apps → **InfoPath Afterlife**.
 
 ## Limits
 
