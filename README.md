@@ -189,8 +189,8 @@ Node 22 is required.
 
 ## How this was built
 
-This repository was written by hand with the help of an AI coding assistant. **It was not
-built with Kiro.**
+This repository was written with an AI coding assistant, under the author's direction. **It
+was not built with Kiro.**
 
 The InfoPath engine it bundles comes from a separate project, InfoPath Afterlife, a web viewer
 for InfoPath forms whose code was written with Kiro for another hackathon. That engine reaches
