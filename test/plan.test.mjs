@@ -198,6 +198,151 @@ test('creating a form posts the stored design and records where it went', async 
   assert.equal((await s.call('getForm', { id: purchase.id })).form.created.length, 1);
 });
 
+test('one click makes a request type named after the form and shows the form on it', async () => {
+  const s = setup();
+  await s.call('saveForm', { record: leave });
+  const r = await s.call('createForm', { id: leave.id, projectKey: 'HR', newRequestType: true });
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.requestTypeName, r.newRequestType, r.portalId], [leave.name, true, '4']);
+  assert.equal(r.portalPath, `/servicedesk/customer/portal/4/create/${r.requestTypeId}`);
+  // Jira puts a new request type in no portal group, so the form is not live yet.
+  assert.equal(r.hidden, true);
+  assert.equal(r.portalGroupsPage, '/jira/servicedesk/projects/HR/settings/portal-settings/portal-groups');
+  assert.equal(r.workType, '[System] Service request', 'the plain service request, not the most used type');
+
+  const type = s.state.requestTypes[4].find((t) => t.id === r.requestTypeId);
+  assert.deepEqual([type.name, type.issueTypeId], [leave.name, '10001']);
+  assert.match(type.description, /Replaces the InfoPath form “Leave Request”/);
+  assert.deepEqual(s.jiraForms.get(`HR/${r.formId}`).publish.portal.portalRequestTypeIds, [Number(r.requestTypeId)]);
+
+  const [made] = (await s.call('listForms')).forms[0].created;
+  assert.deepEqual(
+    [made.requestTypeId, made.requestTypeName, made.portalId, made.serviceDeskId, made.newRequestType, made.hidden],
+    [r.requestTypeId, leave.name, '4', '4', true, true],
+  );
+
+  // A project without that work type gets the one most of its request types use.
+  const fac = await s.call('createForm', { id: leave.id, projectKey: 'FAC', newRequestType: true });
+  assert.equal(fac.workType, 'Facilities request');
+  assert.equal(s.state.requestTypes[5].at(-1).issueTypeId, '10012');
+});
+
+test('a request type is taken back when its form cannot be created', async () => {
+  const s = setup({ refuseForms: true });
+  await s.call('saveForm', { record: leave });
+  const r = await s.call('createForm', { id: leave.id, projectKey: 'HR', newRequestType: true });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /did not accept the form/);
+  assert.equal(/was left/.test(r.error), false);
+  assert.equal(s.state.requestTypes[4].length, 3, 'no request type is left behind');
+
+  s.state.refuseDeletes = true;
+  const left = await s.call('createForm', { id: leave.id, projectKey: 'HR', newRequestType: true });
+  assert.match(left.error, /An empty request type “Leave Request” was left in HR/);
+  assert.deepEqual((await s.call('listForms')).forms[0].created, [], 'and nothing is recorded as created');
+});
+
+test('a site that has not approved the request-type permission is told so, and nothing is created', async () => {
+  const s = setup({ canMakeTypes: false });
+  await s.call('saveForm', { record: leave });
+  const r = await s.call('createForm', { id: leave.id, projectKey: 'HR', newRequestType: true });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Nothing was created.*approve the app’s update/);
+  assert.equal(s.jiraForms.size, 0);
+  // The other two ways still work.
+  assert.equal((await s.call('createForm', { id: leave.id, projectKey: 'HR', requestTypeId: '40' })).ok, true);
+});
+
+test('an existing request type must belong to the project, and its name and portal are recorded', async () => {
+  const s = setup();
+  await s.call('saveForm', { record: leave });
+  const other = await s.call('createForm', { id: leave.id, projectKey: 'HR', requestTypeId: '50' });
+  assert.equal(other.ok, false);
+  assert.match(other.error, /not in project HR/);
+  assert.equal((await s.call('createForm', { id: leave.id, projectKey: 'HR', requestTypeId: '40', newRequestType: true })).ok, false);
+  assert.equal(s.jiraForms.size, 0);
+
+  const r = await s.call('createForm', { id: leave.id, projectKey: 'HR', requestTypeId: '40' });
+  assert.deepEqual([r.ok, r.requestTypeName, r.portalId, r.newRequestType], [true, 'Employee offboarding', '4', undefined]);
+  assert.equal(r.portalPath, '/servicedesk/customer/portal/4/create/40');
+  assert.deepEqual([r.hidden, r.portalGroupsPage], [undefined, undefined], 'it is in a portal group, so the form is live');
+  assert.equal(s.state.requestTypes[4].length, 3, 'no request type was made');
+});
+
+test('a form waits for a portal group, and the plan notices when its request type gets one', async () => {
+  const s = setup();
+  await s.call('saveForm', { record: leave });
+  const r = await s.call('createForm', { id: leave.id, projectKey: 'HR', newRequestType: true });
+  const hidden = async (call = 'listForms') => (await s.call(call)).forms[0].created[0].hidden;
+  assert.equal(await hidden(), true);
+
+  // A project administrator adds the request type to a portal group in Jira.
+  s.addToPortalGroup('4', r.requestTypeId);
+  assert.equal(await hidden('openPlan'), undefined);
+  const key = [...s.store.keys()].find((k) => (s.store.get(k).created ?? []).length === 1);
+  assert.equal('hidden' in s.store.get(key).created[0], false, 'and that is kept');
+  assert.equal((await s.call('getForm', { id: leave.id })).changed, undefined);
+
+  // Taken out of every group again, it waits again. Opening the form notices as well.
+  s.state.requestTypes[4].find((t) => t.id === r.requestTypeId).groupIds = [];
+  const read = await s.call('getForm', { id: leave.id });
+  assert.deepEqual([read.changed, read.form.created[0].hidden], [true, true]);
+  assert.equal(await hidden(), true);
+
+  // When Jira cannot list the request types, the plan shows what it had.
+  s.addToPortalGroup('4', r.requestTypeId);
+  s.state.failTypeLists = true;
+  assert.equal(await hidden(), true);
+  s.state.failTypeLists = false;
+  assert.equal(await hidden(), undefined);
+});
+
+test('an existing request type that is in no portal group is offered as hidden, and its form waits too', async () => {
+  const s = setup();
+  s.state.requestTypes[4].find((t) => t.id === '42').groupIds = [];
+  const { requestTypes } = await s.call('listRequestTypes', { serviceDeskId: '4' });
+  assert.deepEqual(requestTypes.map((t) => [t.id, t.hidden]), [['40', undefined], ['39', undefined], ['42', true]]);
+  await s.call('saveForm', { record: leave });
+  const r = await s.call('createForm', { id: leave.id, projectKey: 'HR', requestTypeId: '42' });
+  assert.deepEqual([r.ok, r.hidden, r.newRequestType], [true, true, undefined]);
+  assert.match(r.portalGroupsPage, /\/HR\/settings\/portal-settings\/portal-groups$/);
+});
+
+test('a form taken off its request type is no longer said to be in the portal', async () => {
+  const s = setup();
+  await s.call('saveForm', { record: leave });
+  const made = await s.call('createForm', { id: leave.id, projectKey: 'HR', newRequestType: true });
+  assert.equal((await s.call('getForm', { id: leave.id })).changed, undefined);
+  s.state.taken.delete(`4/${made.requestTypeId}`);
+  const read = await s.call('getForm', { id: leave.id });
+  assert.equal(read.changed, true);
+  assert.deepEqual(Object.keys(read.form.created[0]).sort(), ['formId', 'projectKey', 'when']);
+  assert.equal((await s.call('getForm', { id: leave.id })).changed, undefined, 'and that is remembered');
+});
+
+test('a form shown in the portal by an earlier version of the app gets its portal link', async () => {
+  const s = setup();
+  await s.call('saveForm', { record: leave });
+  const made = await s.call('createForm', { id: leave.id, projectKey: 'HR', requestTypeId: '40' });
+  const key = [...s.store.keys()].find((k) => (s.store.get(k).created ?? []).length === 1);
+  const old = s.store.get(key);
+  const { projectKey, formId, requestTypeId, when } = old.created[0];
+  s.store.set(key, { ...old, created: [{ projectKey, formId, requestTypeId, when }] });
+
+  const read = await s.call('getForm', { id: leave.id });
+  assert.equal(read.changed, true);
+  const now = read.form.created[0];
+  assert.deepEqual(
+    [now.formId, now.requestTypeId, now.requestTypeName, now.portalId, now.serviceDeskId],
+    [made.formId, '40', 'Employee offboarding', '4', '4'],
+  );
+  assert.equal((await s.call('getForm', { id: leave.id })).changed, undefined, 'and that is remembered');
+
+  s.store.set(key, { ...old, created: [{ projectKey, formId, requestTypeId: '999', when }] });
+  const lost = await s.call('getForm', { id: leave.id });
+  assert.deepEqual(Object.keys(lost.form.created[0]).sort(), ['formId', 'projectKey', 'when'], 'a request type that is gone is forgotten');
+});
+
 test('a second copy in the same project needs to be asked for', async () => {
   const s = setup();
   await s.call('saveForm', { record: leave });
@@ -271,6 +416,29 @@ test('Rovo: creating a form follows the same rules as the page, and never makes 
   const made = await actions.createJsmForm({ form: 'Leave Request', projectKey: ' hr ' }, {});
   assert.equal(made.ok, true);
   assert.deepEqual(made.needsAttention, leave.attention);
+  // Rovo's form gets its own request type. Rovo says the one step that is left, and where.
+  assert.deepEqual([made.project, made.requestType, made.workType], ['HR', 'Leave Request', '[System] Service request']);
+  assert.equal(made.portalLink, 'https://jira.test/servicedesk/customer/portal/4/create/101');
+  assert.equal(made.liveInPortal, false);
+  assert.match(made.nextStep, /adds the request type “Leave Request” to a portal group/);
+  assert.equal(made.portalGroupsPage, 'https://jira.test/jira/servicedesk/projects/HR/settings/portal-settings/portal-groups');
+  const told = await actions.getLegacyForm({ form: 'Leave Request' }, {});
+  assert.deepEqual(told.jsmFormsCreated, [
+    {
+      project: 'HR', created: '2026-11-12', requestType: 'Leave Request',
+      state: 'waiting for a portal group', portalLink: made.portalLink,
+      nextStep: made.nextStep, portalGroupsPage: made.portalGroupsPage,
+    },
+  ]);
+  const waiting = (await actions.listLegacyForms({}, {})).forms[0];
+  assert.deepEqual([waiting.liveInPortal, waiting.waitingForPortalGroup], [undefined, true]);
+  // Once a project administrator has added it to a portal group, Rovo says it is live.
+  s.addToPortalGroup('4', '101');
+  const live = (await actions.listLegacyForms({}, {})).forms[0];
+  assert.deepEqual([live.liveInPortal, live.waitingForPortalGroup], [true, undefined]);
+  assert.deepEqual((await actions.getLegacyForm({ form: 'Leave Request' }, {})).jsmFormsCreated, [
+    { project: 'HR', created: '2026-11-12', requestType: 'Leave Request', state: 'live in the portal', portalLink: made.portalLink },
+  ]);
   assert.match((await actions.createJsmForm({ form: 'Leave Request', projectKey: 'HR' }, {})).error, /already created in HR/);
   s.state.projectAdmin = false;
   assert.match((await actions.createJsmForm({ form: 'Leave Request', projectKey: 'FAC' }, {})).error, /does not administer a service project with the key FAC/);

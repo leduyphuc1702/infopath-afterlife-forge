@@ -3,14 +3,14 @@ import { createRoot } from 'react-dom/client';
 import * as core from '../vendor/afterlife-core.mjs';
 import { analyse } from './analyse.js';
 import { Problem, words } from './ask.js';
-import { enableTheme } from './bridge.js';
+import { enableTheme, open } from './bridge.js';
 import { Detail } from './detail.jsx';
 import { fromDrop, fromInput } from './files.js';
 import { Icon } from './icons.jsx';
 import { ask } from './jira.js';
-import { ConfirmButton, Hint, IconButton, Lozenge, Panel, plural, some, waveTone } from './parts.jsx';
+import { ConfirmButton, CopyLink, fullLink, groupsPage, Hint, IconButton, inPortal, isLive, isWaiting, Lozenge, Panel, plural, portalPath, some, useReturn, waveTone } from './parts.jsx';
 import { installTips } from './tips.js';
-import { CAUSE_WORDS, GUIDE, SAMPLES, STEPS, WAVE_SHORT, WAVE_WORDS } from './words.js';
+import { CAUSE_WORDS, groupStep, GUIDE, SAMPLES, STEPS, WAVE_SHORT, WAVE_WORDS } from './words.js';
 
 /* global APP_VERSION */
 
@@ -91,14 +91,97 @@ function Head({ id, sort, onSort, className, tip, children }) {
   );
 }
 
-function Plan({ forms, selected, onSelect, sort, onSort, onClearFilter }) {
+/** The service project to create in: the only one there is, or the one chosen last time. */
+const deskFrom = (desks, deskId) => (desks.some((d) => d.id === deskId) ? deskId : desks.length === 1 ? desks[0].id : '');
+
+/** Shown while forms are ticked: creates the JSM form of each, one after the other. */
+function Bulk({ forms, targets, deskId, onDesk, onRetryTargets, onClear, onChanged }) {
+  const [run, setRun] = useState(null);
+  const [report, setReport] = useState(null);
+  const desks = targets?.desks ?? [];
+  const desk = deskFrom(desks, deskId);
+  const target = desks.find((d) => d.id === desk);
+  const go = async () => {
+    const out = { projectKey: target.projectKey, made: 0, skipped: [], errors: [] };
+    setReport(null);
+    for (let i = 0; i < forms.length; i++) {
+      const f = forms[i];
+      setRun({ done: i, total: forms.length });
+      if (f.created.some((c) => c.projectKey === target.projectKey)) {
+        out.skipped.push(f.name);
+        continue;
+      }
+      try {
+        await ask('createForm', { id: f.id, projectKey: target.projectKey, newRequestType: true });
+        out.made += 1;
+        // The row shows its link while the next form is being made.
+        onChanged();
+      } catch (e) {
+        if (e.duplicate) out.skipped.push(f.name);
+        else out.errors.push({ name: f.name, why: words(e) });
+        // The next forms would be refused for the same reason.
+        if (e.denied || e.notAdmin) break;
+      }
+    }
+    setRun(null);
+    setReport(out);
+    onChanged();
+  };
+  return (
+    <section className="bulk" aria-label="Create JSM forms for the ticked forms">
+      <div className="fields">
+        <b>{plural(forms.length, 'form')} ticked</b>
+        {targets === null && <span className="subtle">Loading your service projects…</span>}
+        {targets?.error && <span className="error" role="alert">{targets.error} <button className="link" onClick={onRetryTargets}>Try again</button></span>}
+        {targets?.desks && desks.length === 0 && <span>This site has no service project yet.</span>}
+        {desks.length > 1 && (
+          <select aria-label="Service project" value={desk} onChange={(e) => { onDesk(e.target.value); setReport(null); }} disabled={Boolean(run)}>
+            <option value="">Choose a project…</option>
+            {desks.map((d) => <option key={d.id} value={d.id}>{d.projectName} ({d.projectKey})</option>)}
+          </select>
+        )}
+        {desks.length > 0 && (
+          <span className="pair">
+            <button className="primary" disabled={!target || Boolean(run)} onClick={go}>
+              <Icon name="plus" />{run ? `Creating ${run.done + 1} of ${run.total}…` : `Create ${plural(forms.length, 'JSM form')}${target ? ` in ${target.projectKey}` : ''}`}
+            </button>
+            <Hint>Each form gets its own request type, named after the form. One step in Jira is then left: add the new request types to a portal group, and the forms are live. Forms that already have a JSM form in this project are left as they are.</Hint>
+          </span>
+        )}
+        <IconButton icon="close" label="Untick all" onClick={onClear} disabled={Boolean(run)} />
+      </div>
+      <div aria-live="polite">
+        {run && <p className="reading"><progress aria-label="Creating the JSM forms" value={run.done} max={run.total} />Jira is building each form. This takes a few seconds per form.</p>}
+        {report && (report.made > 0 || report.skipped.length > 0) && (
+          <p className="done">
+            <Icon name="check" />
+            {report.made > 0 ? `${plural(report.made, 'JSM form')} created in ${report.projectKey}.` : `Nothing new was created in ${report.projectKey}.`}
+            {report.skipped.length > 0 ? ` ${report.skipped.length} already there: ${some(report.skipped)}.` : ''}
+          </p>
+        )}
+        {report?.errors.slice(0, 5).map((e) => <p key={e.name} className="error" role="alert"><b>{e.name}</b> was not created. {e.why}</p>)}
+        {report && report.errors.length > 5 && <p className="error">{plural(report.errors.length - 5, 'more form')} could not be created either.</p>}
+      </div>
+    </section>
+  );
+}
+
+function Plan({ forms, selected, onSelect, picked, onPick, onPickAll, sort, onSort, onClearFilter }) {
   const head = { sort, onSort };
+  const ticked = forms.filter((f) => picked.has(f.id)).length;
+  const all = useRef(null);
+  useEffect(() => {
+    if (all.current) all.current.indeterminate = ticked > 0 && ticked < forms.length;
+  }, [ticked, forms.length]);
   return (
     <div className="table-scroll">
       <table className="plan">
         <caption className="sr-only">Analysed InfoPath forms. Column headers sort the table; a row opens the form.</caption>
         <thead>
           <tr>
+            <td className="pick">
+              <input ref={all} type="checkbox" aria-label="Tick every form shown" data-tip="Tick every form shown, to create their JSM forms together" disabled={forms.length === 0} checked={forms.length > 0 && ticked === forms.length} onChange={(e) => onPickAll(e.target.checked)} />
+            </td>
             <Head id="name" {...head}>Form</Head>
             <Head id="wave" tip="1: converts as it is. 2: works, with some parts simplified. 3: has parts to replace by hand." {...head}>Wave</Head>
             <Head id="fields" className="num" {...head}>Fields</Head>
@@ -109,12 +192,17 @@ function Plan({ forms, selected, onSelect, sort, onSort, onClearFilter }) {
         </thead>
         <tbody>
           {forms.length === 0 && (
-            <tr className="plain"><td colSpan={6} className="none">No form matches. <button className="link" onClick={onClearFilter}>Show all forms</button></td></tr>
+            <tr className="plain"><td colSpan={7} className="none">No form matches. <button className="link" onClick={onClearFilter}>Show all forms</button></td></tr>
           )}
           {forms.map((f) => {
             const causes = f.causes.map((c) => CAUSE_WORDS[c] ?? c);
+            const live = [...f.created].reverse().find(isLive);
+            const waiting = [...f.created].reverse().find(isWaiting);
             return (
               <tr key={f.id} className={f.id === selected ? 'selected' : undefined} onClick={() => onSelect(f.id)}>
+                <td className="pick" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" aria-label={`Tick ${f.name}`} checked={picked.has(f.id)} onChange={() => onPick(f.id)} />
+                </td>
                 <th scope="row">
                   <button id={`open-${f.id}`} className="link" aria-expanded={f.id === selected} onClick={(e) => { e.stopPropagation(); onSelect(f.id); }}>{f.name}</button>
                   {f.sample && <Lozenge tip="One of the sample forms that come with the app">Sample</Lozenge>}
@@ -128,9 +216,20 @@ function Plan({ forms, selected, onSelect, sort, onSort, onClearFilter }) {
                     : <span className="subtle">None</span>}
                 </td>
                 <td>
-                  {f.created.length > 0
-                    ? <Lozenge tone="success"><Icon name="check" size={12} />{[...new Set(f.created.map((c) => c.projectKey))].join(', ')}</Lozenge>
-                    : <span className="subtle">Not yet</span>}
+                  {f.created.length > 0 ? (
+                    <span className="pair" onClick={(e) => e.stopPropagation()}>
+                      <Lozenge
+                        tone={waiting ? 'warning' : 'success'}
+                        tip={waiting ? `Created. One step left: add “${waiting.requestTypeName ?? f.name}” to a portal group in ${waiting.projectKey}` : live ? 'Live in the customer portal' : 'Saved in the project, not shown in the portal'}
+                      >
+                        <Icon name={waiting ? 'warning' : 'check'} size={12} /><span className="sr-only">{waiting ? 'Waiting for a portal group: ' : ''}</span>{[...new Set(f.created.map((c) => c.projectKey))].join(', ')}
+                      </Lozenge>
+                      {live && <IconButton icon="external" label={`Open “${live.requestTypeName ?? f.name}” in the portal`} onClick={() => open(portalPath(live))} />}
+                      {live && <CopyLink path={portalPath(live)} />}
+                    </span>
+                  ) : (
+                    <span className="subtle">Not yet</span>
+                  )}
                 </td>
                 <td className="go"><Icon name="chevron" /></td>
               </tr>
@@ -195,14 +294,18 @@ function Guide({ onClose }) {
   );
 }
 
-function downloadCsv(forms) {
+async function downloadCsv(forms) {
+  const site = await fullLink('');
   const lines = [
-    ['Form', 'File', 'Wave', 'Fields', 'Rules', 'Data connections', 'Filled records', 'Causes', 'JSM questions', 'Controls converted', 'Controls simplified', 'Controls not converted', 'JSM form created in', 'Analysed'],
+    ['Form', 'File', 'Wave', 'Fields', 'Rules', 'Data connections', 'Filled records', 'Causes', 'JSM questions', 'Controls converted', 'Controls simplified', 'Controls not converted', 'JSM form created in', 'Request type', 'In the portal', 'Portal link', 'Analysed'],
     ...forms.map((f) => [
       f.name, f.fileName, f.wave, f.counts.fields, f.counts.rules, f.counts.connections, f.records ?? '',
       f.causes.map((c) => CAUSE_WORDS[c] ?? c).join('; '),
       f.conversion.questions, f.conversion.converted, f.conversion.simplified, f.conversion.skipped,
       f.created.map((c) => `${c.projectKey} (${c.when.slice(0, 10)})`).join('; '),
+      f.created.filter(inPortal).map((c) => c.requestTypeName ?? c.requestTypeId).join('; '),
+      f.created.filter(inPortal).map((c) => (c.hidden ? 'Needs a portal group' : 'Live')).join('; '),
+      f.created.filter(inPortal).map((c) => `${site}${portalPath(c)}`).join('; '),
       f.analysedAt.slice(0, 10),
     ]),
   ];
@@ -258,6 +361,7 @@ function App() {
   const [targets, setTargets] = useState(null);
   const [problem, setProblem] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [picked, setPicked] = useState(() => new Set());
   const [progress, setProgress] = useState(null);
   const [report, setReport] = useState(null);
   const [over, setOver] = useState(false);
@@ -351,10 +455,41 @@ function App() {
     return all
       .filter((f) => !q || f.name.toLowerCase().includes(q) || f.fileName.toLowerCase().includes(q))
       .filter((f) => !filter.wave || String(f.wave) === filter.wave)
-      .filter((f) => !filter.made || f.created.length > 0)
+      .filter((f) => !filter.made || (filter.made === 'waiting' ? f.created.some(isWaiting) : f.created.length > 0))
       .sort((a, b) => sort.dir * SORTS[sort.key](a, b) || SORTS.wave(a, b));
   }, [forms, filter, sort]);
   const busy = Boolean(progress);
+  const ticked = all.filter((f) => picked.has(f.id));
+  const waiting = all.flatMap((f) => f.created.filter(isWaiting));
+  const waitingForms = all.filter((f) => f.created.some(isWaiting)).length;
+  const waitingIn = [...new Set(waiting.map((c) => c.projectKey))];
+  // Back from Jira's portal settings: what was waiting for a portal group may be live now.
+  useReturn(waiting.length > 0, reload);
+  useEffect(() => {
+    if (waiting.length === 0 && filter.made === 'waiting') setFilter((f) => ({ ...f, made: '' }));
+  }, [waiting.length, filter.made]);
+  // Said once, when forms that were waiting are found to be in a portal group.
+  const liveCount = all.reduce((n, f) => n + f.created.filter(isLive).length, 0);
+  const counted = useRef(null);
+  const [wentLive, setWentLive] = useState(0);
+  useEffect(() => {
+    const was = counted.current;
+    counted.current = { waiting: waiting.length, live: liveCount };
+    if (!was || (was.waiting === waiting.length && was.live === liveCount)) return;
+    setWentLive(waiting.length < was.waiting && liveCount > was.live ? Math.min(was.waiting - waiting.length, liveCount - was.live) : 0);
+  }, [waiting.length, liveCount]);
+  const pick = (id) =>
+    setPicked((now) => {
+      const next = new Set(now);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const pickAll = (on) =>
+    setPicked((now) => {
+      const next = new Set(now);
+      for (const f of shown) on ? next.add(f.id) : next.delete(f.id);
+      return next;
+    });
 
   if (problem?.denied)
     return (
@@ -383,7 +518,7 @@ function App() {
       <header className="top">
         <div className="heading">
           <h1>Move InfoPath forms to Jira Service Management</h1>
-          <Hint>Microsoft’s end date for InfoPath was July 14, 2026. Add your templates to see what each form needs, then turn it into a Jira Service Management form in one click. Rovo can answer questions about every form you add.</Hint>
+          <Hint>Microsoft’s end date for InfoPath was July 14, 2026. Add your templates to see what each form needs, then turn each one into a Jira Service Management form in one click: it gets its own request type and a portal link to send to people. Tick several to create them together. A new request type goes live once you add it to a portal group in Jira. Rovo can answer questions about every form you add.</Hint>
         </div>
         {forms !== null && (
           <div className="actions">
@@ -455,11 +590,38 @@ function App() {
           </div>
           <Status progress={progress} report={report} />
           <Summary forms={all} filter={filter} onFilter={setFilter} />
+          {waiting.length > 0 && (
+            <p className="next-step">
+              <Icon name="warning" />
+              <span>
+                <b>One step left for {plural(waitingForms, 'form')}:</b> add {waiting.length === 1 ? 'its request type' : 'their request types'} to a portal group
+                <Hint>{groupStep(waiting.length === 1 ? waiting[0].requestTypeName : '')}</Hint>
+              </span>
+              {waitingIn.map((key) => (
+                <button key={key} className="primary" onClick={() => open(groupsPage(key))}>Portal groups in {key}<Icon name="external" size={12} /></button>
+              ))}
+              {all.length > 1 && (
+                <button className="link" aria-pressed={filter.made === 'waiting'} onClick={() => setFilter({ ...filter, wave: '', made: filter.made === 'waiting' ? '' : 'waiting' })}>
+                  {filter.made === 'waiting' ? 'Show all forms' : waitingForms === 1 ? 'Show it' : 'Show them'}
+                </button>
+              )}
+              <IconButton icon="refresh" label="Check again" onClick={reload} />
+            </p>
+          )}
+          <div aria-live="polite">
+            {wentLive > 0 && <p className="done"><Icon name="check" />{plural(wentLive, 'form')} {wentLive === 1 ? 'is' : 'are'} live in the portal now.</p>}
+          </div>
           <span className="sr-only" aria-live="polite">{filtered ? `Showing ${shown.length} of ${all.length}` : ''}</span>
+          {ticked.length > 0 && (
+            <Bulk forms={ticked} targets={targets} deskId={deskId} onDesk={chooseDesk} onRetryTargets={loadTargets} onClear={() => setPicked(new Set())} onChanged={reload} />
+          )}
           <Plan
             forms={shown}
             selected={selected}
             onSelect={(id) => (id === selected ? close() : setSelected(id))}
+            picked={picked}
+            onPick={pick}
+            onPickAll={pickAll}
             sort={sort}
             onSort={(key) => setSort((s) => ({ key, dir: s.key === key ? -s.dir : 1 }))}
             onClearFilter={() => setFilter(NO_FILTER)}

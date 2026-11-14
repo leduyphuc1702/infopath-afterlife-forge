@@ -27,8 +27,14 @@ export const GUIDE = [
   ['Other validation rule', 'Help text on the question'],
   ['ActiveX control, button, expression box', 'Not converted; named in the field map'],
 ];
+// Where the old filled records can still be read: the free web viewer this app's engine comes from.
+export const VIEWER = 'https://leduyphuc1702.github.io/infopath-afterlife-app/';
 export const STEPS = [
   ['Add templates', 'Drop your .xsn files anywhere on this page, or try the sample forms. Files are read in your browser and never uploaded.'],
   ['Open a form', 'Each form gets a wave and a death certificate: what stops it from working, with the evidence found in the file.'],
-  ['Create the JSM form', 'One click turns the form into a native Jira Service Management form, shown in your customer portal.'],
+  ['Create the JSM form', 'One click turns the form into a native Jira Service Management form with its own request type. Add that request type to a portal group in Jira, and the form is live in your customer portal, with a link to send to people. Tick several forms to create them together.'],
 ];
+// The one step Jira keeps for a project administrator, in the words of its own settings page.
+export const GROUP_WHY = 'Jira shows a request type in the portal, and lets people send it, only when it is in a portal group. An app cannot put it there.';
+export const groupStep = (name) =>
+  `${GROUP_WHY} In Portal groups, open a group, press “Add request form” and pick ${name ? `“${name}”` : 'each new request type'}. This page notices when it is done.`;

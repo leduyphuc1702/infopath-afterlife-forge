@@ -32,7 +32,12 @@ export function makeAsk(invoke, wait = (ms) => new Promise((done) => setTimeout(
         continue;
       }
       if (!r || r.ok === false)
-        throw new Problem(r?.error ?? 'Jira did not answer. Try again in a moment.', { denied: r?.denied === true });
+        throw new Problem(r?.error ?? 'Jira did not answer. Try again in a moment.', {
+          denied: r?.denied === true,
+          // Why a form was not created, for the part of the page that creates several in a row.
+          duplicate: r?.duplicate === true,
+          notAdmin: r?.notAdmin === true,
+        });
       return r;
     }
   };

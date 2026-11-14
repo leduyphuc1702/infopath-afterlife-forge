@@ -13,6 +13,10 @@ const PERMISSION_PAUSES_MS = [150, 400];
 // Rovo is offered at most this many service projects to choose from.
 const MOST_OFFERED = 30;
 const HEADERS = { Accept: 'application/json' };
+// Jira marks the calls that create and delete a request type as experimental and wants this said.
+const EXPERIMENTAL = { ...HEADERS, 'X-ExperimentalApi': 'opt-in' };
+// Jira takes a request type name of up to 255 characters.
+const TYPE_NAME_MOST = 250;
 
 // One form is three values, so the plan loads without the field lists and the designs.
 const briefKey = (id) => `brief:${id}`;
@@ -29,6 +33,22 @@ export const WAVE_WORDS = {
 };
 
 const fail = (error, extra) => ({ ok: false, error, ...extra });
+const portalPath = (c) => `/servicedesk/customer/portal/${c.portalId}/create/${c.requestTypeId}`;
+const inPortal = (c) => Boolean(c.portalId && c.requestTypeId);
+// Jira shows a request type in the portal, and lets people send it from there, only when it is in
+// a portal group. The app can read the groups of a request type; Jira gives it no way to set them.
+const isLive = (c) => inPortal(c) && !c.hidden;
+const isWaiting = (c) => inPortal(c) && c.hidden === true;
+const groupsPage = (projectKey) => `/jira/servicedesk/projects/${projectKey}/settings/portal-settings/portal-groups`;
+/** Is this request type, as Jira describes it, in no portal group? Undefined when Jira does not say. */
+const hiddenOf = (t) => (Array.isArray(t?.groupIds) ? t.groupIds.length === 0 : undefined);
+/** The record with what Jira says about its portal groups. The same object when nothing changed. */
+function withGroups(c, t) {
+  const hidden = hiddenOf(t);
+  if (hidden === undefined || hidden === (c.hidden === true)) return c;
+  const { hidden: _was, ...rest } = c;
+  return hidden ? { ...rest, hidden: true } : rest;
+}
 const bytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length;
 const day = (iso) => String(iso).slice(0, 10);
 
@@ -212,23 +232,109 @@ export function createBackend({
     return { ok: true, values };
   }
 
-  /** The JSM forms made from this form that are still in Jira. Deleted ones leave the record. */
+  /** Does Jira still have this? Only a clear "not found" counts as gone. */
+  async function gone(path) {
+    try {
+      return (await jira.asApp(path, { headers: HEADERS })).status === 404;
+    } catch {
+      return false;
+    }
+  }
+
+  /** What Jira says about a request type now: its description, `{ gone: true }`, or undefined when it cannot say. */
+  async function typeNow(deskId, requestTypeId) {
+    try {
+      const res = await jira.asApp(route`/rest/servicedeskapi/servicedesk/${deskId}/requesttype/${requestTypeId}`, {
+        headers: HEADERS,
+      });
+      if (res.status === 404) return { gone: true };
+      return res.ok ? await json(res) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  const offItsType = ({ requestTypeId: _id, requestTypeName: _name, portalId: _portal, serviceDeskId: _desk, newRequestType: _new, hidden: _hidden, ...rest }) => rest;
+
+  /**
+   * The record of a form on a request type, as Jira has it now: whether the request type is in a
+   * portal group, and, for a record written before the app kept them, its portal and name.
+   * When Jira cannot say, the record stays as it is and is asked about again next time.
+   */
+  async function withType(c) {
+    if (!c.requestTypeId) return c;
+    let deskId = c.serviceDeskId;
+    if (!deskId || !c.portalId) {
+      const found = await deskOf(c.projectKey);
+      if (!found.ok) return c;
+      deskId = found.desk.id;
+    }
+    const t = await typeNow(deskId, c.requestTypeId);
+    if (!t) return c;
+    if (t.gone) return offItsType(c);
+    const whole =
+      c.portalId && c.serviceDeskId
+        ? c
+        : { ...c, ...(t.name && { requestTypeName: t.name }), portalId: String(t.portalId ?? deskId), serviceDeskId: deskId };
+    return withGroups(whole, t);
+  }
+
+  /**
+   * The JSM forms made from this form that are still in Jira. Deleted ones leave the record, and
+   * one that was taken off its request type is no longer said to be in the portal.
+   */
   async function stillInJira(brief) {
     const made = brief.created ?? [];
     if (made.length === 0) return made;
-    const there = await eachLimited(made, 4, async (c) => {
+    const kept = await eachLimited(made, 4, async (was) => {
+      if (await gone(route`/forms/project/${was.projectKey}/form/${was.formId}`)) return undefined;
+      const c = await withType(was);
+      if (
+        c.serviceDeskId && inPortal(c) &&
+        (await gone(route`/forms/servicedesk/${c.serviceDeskId}/requesttype/${c.requestTypeId}/form`))
+      )
+        return offItsType(c);
+      return c;
+    });
+    const live = kept.filter(Boolean);
+    if (live.length !== made.length || live.some((c, i) => c !== made[i]))
+      await kvs.set(briefKey(brief.id), { ...brief, created: live });
+    return live;
+  }
+
+  /**
+   * The plan with what Jira says now about portal groups: one list of request types per service
+   * project that has a form on one. A project Jira cannot list keeps what the plan had.
+   */
+  async function planBriefs() {
+    const briefs = await allBriefs();
+    const desks = new Set();
+    for (const b of briefs) for (const c of b.created ?? []) if (c.serviceDeskId && inPortal(c)) desks.add(c.serviceDeskId);
+    if (desks.size === 0) return briefs;
+    const types = new Map();
+    await eachLimited([...desks], 4, async (desk) => {
       try {
-        const res = await jira.asApp(route`/forms/project/${c.projectKey}/form/${c.formId}`, {
-          headers: HEADERS,
-        });
-        return res.status !== 404;
+        const list = await everyPage(
+          (start) => route`/rest/servicedeskapi/servicedesk/${desk}/requesttype?start=${start}&limit=100`,
+        );
+        if (list.ok) for (const t of list.values) types.set(`${desk}/${t.id}`, t);
       } catch {
-        return true;
+        // Shown as the plan had it.
       }
     });
-    const live = made.filter((_, i) => there[i]);
-    if (live.length !== made.length) await kvs.set(briefKey(brief.id), { ...brief, created: live });
-    return live;
+    return Promise.all(
+      briefs.map(async (b) => {
+        const made = b.created ?? [];
+        const now = made.map((c) => {
+          const t = c.serviceDeskId && types.get(`${c.serviceDeskId}/${c.requestTypeId}`);
+          return t ? withGroups(c, t) : c;
+        });
+        if (now.every((c, i) => c === made[i])) return b;
+        const next = { ...b, created: now };
+        await kvs.set(briefKey(b.id), next);
+        return next;
+      }),
+    );
   }
 
   async function saveForm({ record }) {
@@ -274,11 +380,12 @@ export function createBackend({
     if (!ID.test(String(id))) return fail('Unknown form.');
     const [brief, detail] = await Promise.all([kvs.get(briefKey(id)), kvs.get(detailKey(id))]);
     if (!brief || !detail) return fail('This form is no longer in the plan.');
+    const before = brief.created ?? [];
     const created = await stillInJira(brief);
     return {
       ok: true,
       form: { ...detail, created },
-      ...(created.length !== (brief.created ?? []).length && { changed: true }),
+      ...((created.length !== before.length || created.some((c, i) => c !== before[i])) && { changed: true }),
     };
   }
 
@@ -339,15 +446,138 @@ export function createBackend({
         name: t.name,
         portalId: String(t.portalId),
         hasForm: taken[i],
+        ...(hiddenOf(t) === true && { hidden: true }),
       })),
     };
   }
 
-  async function createJsmForm({ formId, projectKey, requestTypeId, again = false }) {
+  const noProject = (projectKey) =>
+    fail(`Project ${projectKey} was not found, or it is not a service project.`);
+
+  /** The service desk behind a project key. The key is the one the person was checked against. */
+  async function deskOf(projectKey) {
+    const all = await listTargets();
+    if (!all.ok) return all;
+    const desk = all.desks.find((d) => d.projectKey === projectKey);
+    return desk ? { ok: true, desk } : noProject(projectKey);
+  }
+
+  /**
+   * The work type a new request type gets. A request type cannot change it later, so the choice
+   * follows the project: its plain "Service request" type when it has one, otherwise the work type
+   * most of its request types already use.
+   */
+  async function workTypeFor(desk) {
+    let ofProject = [];
+    try {
+      const res = await jira.asApp(route`/rest/api/3/project/${desk.projectKey}`, { headers: HEADERS });
+      if (res.ok) ofProject = ((await json(res)).issueTypes ?? []).filter((t) => !t.subtask);
+    } catch {
+      // The request types below still say which work types the project uses.
+    }
+    const plain = ofProject.find((t) => /^(\[system\]\s*)?service request$/i.test(String(t.name).trim()));
+    if (plain) return { id: String(plain.id), name: plain.name };
+
+    const types = await everyPage(
+      (start) => route`/rest/servicedeskapi/servicedesk/${desk.id}/requesttype?start=${start}&limit=100`,
+    );
+    const uses = new Map();
+    for (const t of types.ok ? types.values : [])
+      if (t.issueTypeId) uses.set(String(t.issueTypeId), (uses.get(String(t.issueTypeId)) ?? 0) + 1);
+    const [most] = [...uses].sort((a, b) => b[1] - a[1]);
+    const id = most?.[0] ?? (ofProject[0] && String(ofProject[0].id));
+    if (!id) return undefined;
+    return { id, name: ofProject.find((t) => String(t.id) === id)?.name };
+  }
+
+  /** Makes the request type a form is shown on, named after the form. */
+  async function makeRequestType(desk, brief) {
+    const workType = await workTypeFor(desk);
+    if (!workType)
+      return fail(`Project ${desk.projectKey} has no work type a request type can use. Nothing was created.`);
+    const name = brief.name.slice(0, TYPE_NAME_MOST);
+    const words = `Replaces the InfoPath form “${brief.name.slice(0, 200)}”.`;
+    let res;
+    try {
+      res = await jira.asApp(route`/rest/servicedeskapi/servicedesk/${desk.id}/requesttype`, {
+        method: 'POST',
+        headers: { ...EXPERIMENTAL, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issueTypeId: workType.id, name, description: words, helpText: words }),
+      });
+    } catch {
+      return fail('Jira did not answer. Check the project’s request types before trying again.');
+    }
+    const made = await json(res);
+    if (!res.ok || !made.id) {
+      const said = made.errorMessage ?? made.errors?.[0]?.message ?? made.message ?? '';
+      return fail(
+        res.status === 401 || res.status === 403
+          ? `Jira did not let the app create a request type in ${desk.projectKey} (status ${res.status}). Nothing was created. A Jira administrator may still have to approve the app’s update under Settings, Apps, Manage apps.`
+          : `Jira did not create the request type (status ${res.status}). Nothing was created. ${said}`.trim(),
+      );
+    }
+    return {
+      ok: true,
+      type: {
+        id: String(made.id),
+        name: made.name ?? name,
+        portalId: String(made.portalId ?? desk.id),
+        made: true,
+        // Jira puts a new request type in no portal group.
+        hidden: hiddenOf(made) !== false,
+        ...(workType.name && { workType: workType.name }),
+      },
+    };
+  }
+
+  /** A request type that exists already. It must belong to the project the person was checked on. */
+  async function readRequestType(desk, requestTypeId) {
+    let res;
+    try {
+      res = await jira.asApp(route`/rest/servicedeskapi/servicedesk/${desk.id}/requesttype/${requestTypeId}`, {
+        headers: HEADERS,
+      });
+    } catch {
+      return fail('Jira did not answer. Nothing was created. Try again in a moment.');
+    }
+    if (!res.ok)
+      return fail(
+        res.status === 404
+          ? `That request type is not in project ${desk.projectKey}. Nothing was created.`
+          : `Jira did not show the request type (status ${res.status}). Nothing was created.`,
+      );
+    const t = await json(res);
+    return {
+      ok: true,
+      type: { id: String(requestTypeId), name: t.name, portalId: String(t.portalId ?? desk.id), hidden: hiddenOf(t) === true },
+    };
+  }
+
+  /** Takes back a request type made a moment ago, when its form could not be created. */
+  async function dropRequestType(desk, type) {
+    try {
+      const res = await jira.asApp(route`/rest/servicedeskapi/servicedesk/${desk.id}/requesttype/${type.id}`, {
+        method: 'DELETE',
+        headers: EXPERIMENTAL,
+      });
+      return res.ok || res.status === 404;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * @param requestTypeId   show the form on this request type, or
+   * @param newRequestType  make a request type named after the form and show it there.
+   *                        With neither, the form is saved in the project only.
+   */
+  async function createJsmForm({ formId, projectKey, requestTypeId, newRequestType = false, again = false }) {
     if (!ID.test(String(formId))) return fail('Unknown form.');
     if (!PROJECT_KEY.test(String(projectKey))) return fail('That is not a project key.');
     if (requestTypeId !== undefined && !DIGITS.test(String(requestTypeId)))
       return fail('That is not a request type.');
+    if (requestTypeId !== undefined && newRequestType)
+      return fail('Choose a new request type or an existing one, not both.');
     const [brief, design, detail] = await Promise.all([
       kvs.get(briefKey(formId)),
       kvs.get(designKey(formId)),
@@ -369,12 +599,29 @@ export function createBackend({
         { duplicate: true },
       );
 
+    // The request type the form is shown on, if any.
+    let desk;
+    let type;
+    if (newRequestType || requestTypeId !== undefined) {
+      const found = await deskOf(projectKey);
+      if (!found.ok) return found;
+      desk = found.desk;
+      const got = newRequestType ? await makeRequestType(desk, brief) : await readRequestType(desk, requestTypeId);
+      if (!got.ok) return got;
+      type = got.type;
+    }
+    // A request type made here goes away again when its form cannot be created.
+    const undo = async (error) => {
+      if (!type?.made || (await dropRequestType(desk, type))) return fail(error);
+      return fail(`${error} An empty request type “${type.name}” was left in ${projectKey}: delete it under Project settings, Request types.`);
+    };
+
     const body = {
       design,
-      ...(requestTypeId !== undefined && {
+      ...(type && {
         publish: {
           portal: {
-            portalRequestTypeIds: [Number(requestTypeId)],
+            portalRequestTypeIds: [Number(type.id)],
             submitOnCreate: true,
             validateOnCreate: true,
           },
@@ -389,20 +636,26 @@ export function createBackend({
         body: JSON.stringify(body),
       });
     } catch {
-      return fail('Jira did not answer. Check the project’s forms before trying again.');
+      return undo('Jira did not answer. Check the project’s forms before trying again.');
     }
     const made = await json(res);
     if (!res.ok || !made.id) {
-      if (res.status === 404)
-        return fail(`Project ${projectKey} was not found, or it is not a service project.`);
+      if (res.status === 404) return undo(noProject(projectKey).error);
       const said = made.errors?.[0]?.message ?? made.errorMessages?.[0] ?? made.message ?? made.raw ?? '';
-      return fail(`Jira did not accept the form (status ${res.status}). ${said}`.trim());
+      return undo(`Jira did not accept the form (status ${res.status}). ${said}`.trim());
     }
 
     const created = {
       projectKey,
       formId: made.id,
-      ...(requestTypeId !== undefined && { requestTypeId: String(requestTypeId) }),
+      ...(type && {
+        requestTypeId: type.id,
+        requestTypeName: type.name,
+        portalId: type.portalId,
+        serviceDeskId: desk.id,
+        ...(type.made && { newRequestType: true }),
+        ...(type.hidden && { hidden: true }),
+      }),
       when: new Date(now()).toISOString(),
     };
     await kvs.set(briefKey(formId), { ...brief, created: [...live, created] });
@@ -412,6 +665,11 @@ export function createBackend({
       name: brief.name,
       questions: brief.conversion.questions,
       formsPage: `/jira/servicedesk/projects/${projectKey}/settings/forms`,
+      ...(type && {
+        portalPath: portalPath(created),
+        ...(type.hidden && { portalGroupsPage: groupsPage(projectKey) }),
+      }),
+      ...(type?.workType && { workType: type.workType }),
       needsAttention: detail?.attention ?? [],
     };
   }
@@ -439,8 +697,8 @@ export function createBackend({
   };
 
   const resolvers = {
-    openPlan: forAdmins(async () => ({ ok: true, forms: await allBriefs(), settings: await settings() })),
-    listForms: forAdmins(async () => ({ ok: true, forms: await allBriefs() })),
+    openPlan: forAdmins(async () => ({ ok: true, forms: await planBriefs(), settings: await settings() })),
+    listForms: forAdmins(async () => ({ ok: true, forms: await planBriefs() })),
     getForm: forAdmins(getForm),
     saveForm: forAdmins(saveForm),
     removeForms: forAdmins(removeForms),
@@ -451,6 +709,7 @@ export function createBackend({
         formId: p.id,
         projectKey: p.projectKey,
         requestTypeId: p.requestTypeId,
+        newRequestType: p.newRequestType === true,
         again: p.again === true,
       }),
     ),
@@ -464,6 +723,35 @@ export function createBackend({
       'On this site only Jira administrators can read the InfoPath migration plan. A Jira administrator can open it to everyone under Settings, Apps, InfoPath Afterlife.',
   };
   const OFFER = 'Use list-service-projects to offer the ones this person administers.';
+  const nextStep = (c) =>
+    `A project administrator adds the request type “${c.requestTypeName}” to a portal group: project settings, Portal, Portal groups, open a group, Add request form. Until then Jira keeps it out of the portal and people cannot send it.`;
+
+  /** The site's address, so a link can be given in full. Without it the path alone is given. */
+  let site;
+  async function siteBase() {
+    if (site === undefined) {
+      try {
+        const res = await jira.asApp(route`/rest/api/3/serverInfo`, { headers: HEADERS });
+        const base = res.ok ? (await json(res)).baseUrl : undefined;
+        if (typeof base === 'string' && /^https:\/\//.test(base)) site = base.replace(/\/+$/, '');
+      } catch {
+        // Asked again next time.
+      }
+    }
+    return site ?? '';
+  }
+  /** What Rovo is told about the JSM forms made from one InfoPath form. */
+  const madeForRovo = (created, base) =>
+    (created ?? []).map((c) => ({
+      project: c.projectKey,
+      created: day(c.when),
+      ...(c.requestTypeName && { requestType: c.requestTypeName }),
+      ...(inPortal(c) && {
+        state: c.hidden ? 'waiting for a portal group' : 'live in the portal',
+        portalLink: `${base}${portalPath(c)}`,
+      }),
+      ...(isWaiting(c) && { nextStep: nextStep(c), portalGroupsPage: `${base}${groupsPage(c.projectKey)}` }),
+    }));
   /** The answer to give instead of the plan, when this person may not read it. */
   async function closedTo(context) {
     if ((await settings()).rovoAccess !== 'admins') return undefined;
@@ -485,7 +773,7 @@ export function createBackend({
     async listLegacyForms(_payload, context) {
       const closed = await closedTo(context);
       if (closed) return closed;
-      const forms = await allBriefs();
+      const forms = await planBriefs();
       if (forms.length === 0)
         return {
           forms: [],
@@ -508,6 +796,8 @@ export function createBackend({
           ...(f.records !== undefined && { filledRecords: f.records }),
           causesOfDeath: f.causes.map((id) => CAUSE_WORDS[id] ?? id),
           jsmFormsCreated: (f.created ?? []).map((c) => c.projectKey),
+          ...((f.created ?? []).some(isLive) && { liveInPortal: true }),
+          ...((f.created ?? []).some(isWaiting) && { waitingForPortalGroup: true }),
           ...(f.sample && { bundledSample: true }),
         })),
       };
@@ -516,7 +806,7 @@ export function createBackend({
     async getLegacyForm(payload, context) {
       const closed = await closedTo(context);
       if (closed) return closed;
-      const briefs = await allBriefs();
+      const briefs = await planBriefs();
       const found = find(briefs, payload?.form);
       if (!found.form) return noMatch(payload?.form, found, briefs);
       const f = await kvs.get(detailKey(found.form.id));
@@ -549,7 +839,7 @@ export function createBackend({
           ...(x.note && { note: x.note }),
         })),
         ...(omitted > 0 && { fieldsNotListedHere: omitted }),
-        jsmFormsCreated: found.form.created ?? [],
+        jsmFormsCreated: madeForRovo(found.form.created, await siteBase()),
       };
     },
 
@@ -562,8 +852,23 @@ export function createBackend({
       const projectKey = String(payload?.projectKey ?? '').trim().toUpperCase();
       if (!projectKey)
         return { error: `No service project was named, so nothing was created. ${OFFER}` };
-      const result = await createJsmForm({ formId: found.form.id, projectKey });
-      if (result.ok) return result;
+      const result = await createJsmForm({ formId: found.form.id, projectKey, newRequestType: true });
+      if (result.ok)
+        return {
+          ok: true,
+          name: result.name,
+          project: result.projectKey,
+          questions: result.questions,
+          requestType: result.requestTypeName,
+          ...(result.workType && { workType: result.workType }),
+          liveInPortal: !result.hidden,
+          portalLink: `${await siteBase()}${result.portalPath}`,
+          ...(result.hidden && {
+            nextStep: nextStep(result),
+            portalGroupsPage: `${await siteBase()}${result.portalGroupsPage}`,
+          }),
+          needsAttention: result.needsAttention,
+        };
       // A project that does not exist and one the person may not change get the same answer.
       if (result.notAdmin)
         return {

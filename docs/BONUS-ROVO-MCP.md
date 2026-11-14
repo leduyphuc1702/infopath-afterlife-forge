@@ -8,9 +8,9 @@ four actions as MCP tools:
 | Tool | Inputs | Result |
 |---|---|---|
 | `list-legacy-forms` | none | The migration plan: totals per wave, and one entry per analysed InfoPath form |
-| `get-legacy-form` | `form` (name or part of it) | Causes of death with evidence, conversion counts, the attention list and the field map |
+| `get-legacy-form` | `form` (name or part of it) | Causes of death with evidence, conversion counts, the attention list, the field map, and for each JSM form made from it the portal link and whether it is live or waiting for a portal group |
 | `list-service-projects` | none | The service projects the person asking administers |
-| `create-jsm-form` | `form`, `projectKey` | Creates the JSM form in that service project and returns where it is and what still needs a person |
+| `create-jsm-form` | `form`, `projectKey` | Makes a request type named after the form in that service project, puts the JSM form on it, and returns the customer portal link, whether the form is live yet, the step left when it is not, and what still needs a person |
 
 The Rovo agent in this app uses the same four actions, so a person in Rovo Chat and a client
 over MCP get the same answers from the same code.
@@ -23,8 +23,8 @@ plan, how to explain one form, and when a form may be created.
 A migration is planned outside Jira as much as inside it: in a planning document, in a coding
 assistant writing the replacement for a form's code-behind, in a script that reports progress.
 Those tools speak MCP. With this server they can ask the site which legacy forms exist, what
-each one depends on and whether its JSM form exists yet, without anyone exporting a
-spreadsheet. A developer rewriting the logic of one form can have their assistant read which
+each one depends on, whether its JSM form exists yet and where people fill it in, without
+anyone exporting a spreadsheet. A developer rewriting the logic of one form can have their assistant read which
 events its code-behind handled, and on which fields, straight from `get-legacy-form`.
 
 ## Safety

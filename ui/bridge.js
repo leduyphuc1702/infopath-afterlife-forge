@@ -8,3 +8,5 @@ const impl = DEV_STANDIN ? await import('./stand-in.js') : await import('./forge
 export const invoke = (name, payload) => impl.invoke(name, payload);
 export const open = (url) => impl.open(url);
 export const enableTheme = () => impl.enableTheme();
+/** The site's address, for a link the person copies and sends on. */
+export const siteUrl = () => impl.siteUrl();

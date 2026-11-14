@@ -1,8 +1,11 @@
 # InfoPath Afterlife for Jira Service Management
 
-A Forge app that reads a team's old Microsoft InfoPath form templates, says what stops each
-one from working, turns each into a native Jira Service Management (JSM) form in one step, and
-gives Rovo the same knowledge so anyone can ask about the migration in plain words.
+A Forge app that replaces a team's old Microsoft InfoPath forms. It reads the templates, says
+what stops each one from working, and builds each form in Jira Service Management (JSM) in
+one click: a request type, the form on it, and the customer portal link to send to the people
+who used to fill in the old one. Jira keeps one step for a person, adding the request type to
+a portal group, and the app shows which forms wait for it and which are live. Rovo gets the
+same knowledge, so anyone can ask about the migration in plain words.
 
 Built for Codegeist 2026, Business category.
 
@@ -37,15 +40,25 @@ to each heading, so the page stays short.
 3. **Writes a death certificate per form.** Each cause is listed only when the template holds
    evidence for it, with the file and path of that evidence, the date, the source, and what
    replaces it.
-4. **Creates the JSM form.** One button turns the form's default view into a JSM form in a
-   service project and, if the admin picks a request type, shows it in the customer portal.
-   A field map shows what happened to every InfoPath control, and a "Needs your attention"
-   list names what a person still has to finish.
-5. **Gives Rovo the context.** A Rovo agent, a Rovo skill and an MCP server share four
+4. **Replaces the form.** One button makes a request type named after the form in a service
+   project, turns the form's default view into a JSM form on it, and shows the link people
+   use to fill it in the customer portal. One step is left for a project admin: adding the
+   request type to a portal group. Jira lets people send a request type only when it is in
+   one, and gives an app no way to put it there. The app opens that settings page, reads the
+   answer back from Jira, and marks the form live once it is done. A field map shows what
+   happened to every InfoPath control, and a "Needs your attention" list names what a person
+   still has to finish.
+5. **Does a whole folder at once.** Tick several forms, or all of them, and one button
+   creates them one after the other in the chosen project. Forms that are already there are
+   left alone. The plan shows which forms wait for a portal group and which are live, with
+   the portal link of each live form and a copy button. The CSV export has both the state
+   and the links.
+6. **Gives Rovo the context.** A Rovo agent, a Rovo skill and an MCP server share four
    actions: the plan, one form's analysis, the service projects the person asking administers,
-   and creating a form. Someone who never
-   saw InfoPath can ask "Which forms should we migrate first?" or "What stops the Expense
-   Report form from working?" and get an answer taken from the analysis, not from guesses.
+   and replacing a form. Someone who never saw InfoPath can ask "Which forms should we
+   migrate first?", "What stops the Expense Report form from working?" or "Where do people
+   fill in the Leave Request form now?" and get an answer taken from the analysis, not from
+   guesses.
 
 ## Why it fits the theme
 
@@ -69,7 +82,14 @@ All numbers come from the scripts in this repository or from calls to a real Jir
 | Controls not converted (an ActiveX control) | 1 |
 | A converted form published to a portal request type, then read back | worked |
 | Admin page used inside Jira: 11 sample forms added, a form opened, its JSM form created, the form shown in the customer portal | worked |
+| One click on a form inside Jira: a request type made, the form put on it, the form opened by its portal link | worked |
+| That form sent from the portal while its request type was in no portal group | refused by Jira ("Couldn't send request") |
+| The same form sent after the request type was added to a portal group in Jira's settings | worked: the request was created |
+| The app after that step, on three forms: "Check again" pressed for one, the browser tab returned to for two | each turned from "waiting for a portal group" to live, and the "one step left" count went 10, 9, 8, 7 |
+| Eleven forms ticked and created together inside Jira | 10 created in under a minute, each waiting for its portal group; the one that was already there was left alone |
 | Rovo agent used in Rovo Chat inside Jira: the plan, one form, and creating a form after Rovo's confirm step | worked |
+| Rovo asked where two forms are filled in now, one live and one waiting | gave the portal link of the live one; said the other is not live yet, named the step and linked the project's Portal groups page |
+| Rovo asked to replace another form | after the confirm step it made the request type and the form, said one step is left, linked the Portal groups page and gave the link people will use |
 | Outbound network calls made by the app | none: the deployed version is eligible for Runs on Atlassian |
 
 The 47 sample templates were written for this project and are MIT licensed. Eleven of them
@@ -77,7 +97,8 @@ ship with the app so anyone can try it without owning an InfoPath form.
 
 Some things are **not yet tried on a real site**: connecting an outside MCP client, a person
 who does not administer the project asking Rovo to create a form, the "Jira administrators
-only" setting, and the dark theme. See "Limits".
+only" setting, the dark theme, and a site whose admin has not yet approved the update that
+adds the request-type permissions. See "Limits".
 
 ## How it works
 
@@ -102,8 +123,10 @@ only" setting, and the dark theme. See "Limits".
 - `lib/convert.mjs` maps the default view's controls to JSM form questions. It is pure: no
   DOM, no Forge, no network, and the same template always gives the same design.
 - `lib/summary.mjs` builds the record the app keeps about one form.
-- `src/plan.mjs` is the backend: storage, the Forms API calls and the four Rovo actions. It
-  takes Forge as a parameter, so the tests run it against a stand-in (`lib/fake-forge.mjs`).
+- `src/plan.mjs` is the backend: storage, the request type and Forms API calls, and the four
+  Rovo actions. It makes the request type first and takes it back when the form cannot be
+  created, so a failed click leaves nothing behind. It takes Forge as a parameter, so the
+  tests run it against a stand-in (`lib/fake-forge.mjs`).
   `src/index.js` only wires it to the real Forge modules.
 - `ui/` is the admin page (React, Atlassian design tokens, follows the Jira theme).
 - `prompts/agent.md` and `skills/infopath-migration-plan/SKILL.md` tell Rovo how to use the
@@ -147,7 +170,8 @@ signatures.
 ## Install and try
 
 **Install the app as it is.** Open this link as an admin of a Jira Cloud site that has Jira
-Service Management, choose the site, and accept the five permissions:
+Service Management, choose the site, and accept the seven permissions (listed with their
+reasons in [docs/SETUP.md](docs/SETUP.md)):
 
 **[Install InfoPath Afterlife on your Jira site](https://developer.atlassian.com/console/install/75ddeb29-1546-423b-a084-86dca835517f?signature=AYABeGs1dV00HXZAHEH0Dlv24d4AAAADAAdhd3Mta21zAEthcm46YXdzOmttczp1cy13ZXN0LTI6NzA5NTg3ODM1MjQzOmtleS83MDVlZDY3MC1mNTdjLTQxYjUtOWY5Yi1lM2YyZGNjMTQ2ZTcAuAECAQB4CxqLTo9l4lqXuFjNim1xJM%2Bp%2F3TVP9xHS2BrU5DRRucBRyg4QOhk9%2FSyBqi526mjUgAAAH4wfAYJKoZIhvcNAQcGoG8wbQIBADBoBgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDKJ0OyYfwPxVylkIwgIBEIA7AJnUcb8TCShlnHjZp7jsODOraW7%2FVliqYLhm0SsAdVg7IYoa4QoK5OhOV3VwQdoN88y7%2BI0hICCApT0AB2F3cy1rbXMAS2Fybjphd3M6a21zOmV1LXdlc3QtMTo3MDk1ODc4MzUyNDM6a2V5LzQ2MzBjZTZiLTAwYzMtNGRlMi04NzdiLTYyN2UyMDYwZTVjYwC4AQICAHi9bVMAkme4qVQX1fQHo6ePw3H40A7cGfz7yrmSfBWMXgGaXZSlaqK0c512dK39m0vMAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMKm5E%2FNOmT7G3xgBZAgEQgDslrxwT0IJOX9UVmrUdIXu76%2BM3M8i9f8J27zAszQ6Tq0b3JbVpyeBjB%2BArc5edVxKLaCAr4zUSllGtaAAHYXdzLWttcwBLYXJuOmF3czprbXM6dXMtZWFzdC0xOjcwOTU4NzgzNTI0MzprZXkvNmMxMjBiYTAtNGNkNS00OTg1LWI4MmUtNDBhMDQ5NTJjYzU3ALgBAgIAeDYASx0XCjkny4iLV6vz%2BKtEGSGT6kdt0QRpkn6D%2FlVEAVPOkOHiRPtx3v8qu8xw0OIAAAB%2BMHwGCSqGSIb3DQEHBqBvMG0CAQAwaAYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAzjWvckmi1qfL8Tej0CARCAO0cCbX8EdUFav4sq%2BxVXRtSWfmetYK5jTkqTzGoy2BOnF%2BDqt1p1pS%2Bg4zyOe5AiemmHEuv%2FoQoUaaRhAgAAAAAMAAAQAAAAAAAAAAAAAAAAABN3reOpzQYyiQdljYfMlDD%2F%2F%2F%2F%2FAAAAAQAAAAAAAAAAAAAAAQAAADLw8g3sWYWZ%2BgIv17Zm6bH7YRiOOUXyIg9Jk6U3I8QE9NTPAmL82nSACM7u1iS3ZIDGjtZPILI555Pz%2FvRjbi2noqs%3D&product=jira)**
 
@@ -171,22 +195,34 @@ The app then appears in the same place: Jira → Settings → Apps → **InfoPat
 
 - **Not yet tried on a real site:** the MCP server from an outside client (a site admin has to
   switch the tools on first), a create request from a person who does not administer the
-  project, the "Jira administrators only" setting, and the dark theme. The refusal and the
-  setting are covered by tests against a stand-in for Forge, not by a run in Jira.
+  project, the "Jira administrators only" setting, the dark theme, and the message a site
+  gets before its admin approves the update. The refusal, the setting and that message are
+  covered by tests against a stand-in for Forge, not by a run in Jira.
 - JSM forms have no repeating rows, no calculations and no rule actions, so those parts are
   simplified, and the app says so for each field instead of hiding it.
-- The app attaches a form to an existing request type. It does not create request types: Jira
-  refused that call for app permissions.
+- A new request type is not live until a project admin adds it to a portal group: Project
+  settings (Jira now labels them Space settings), Channels & self service, Portal, Portal
+  groups, "Add request form". Until then its link opens the form and Jira refuses to send
+  it. Jira's API lets an app read the groups of a request type and has no call that sets
+  them, so the app cannot do this step. It opens the page, checks again when the admin comes
+  back to it, and never calls a form live before Jira says its request type is in a group.
+- The app picks the work type of a new request type: the project's "Service request" type,
+  or else the one most of its request types use. Jira does not let a request type change it
+  later. An admin who wants another one picks an existing request type instead.
+- A site that installed an earlier version has to approve the update once (two more
+  permissions, for request types). Until then the app says so and creates nothing.
 - Lists filled from a data source arrive empty. The field map tells the admin to add the
   choices or link the question to a Jira field or an Assets object.
-- Filled records are counted, not imported.
+- Filled records are counted, not imported as requests. They stay in their `.xml` files; the
+  companion web viewer opens them in a browser, beside their form, without InfoPath, and the
+  app links to it.
 - Workflows attached to a form library outside the template cannot be seen in the file.
 
 ## Development
 
 | Command | What it does |
 |---|---|
-| `npm test` | 50 tests: every sample template converts to a well-formed design; file intake; analysis; the page's calls; the backend and the four actions against a stand-in for Forge |
+| `npm test` | 58 tests: every sample template converts to a well-formed design; file intake; analysis; the page's calls; the backend and the four actions against a stand-in for Forge |
 | `AFTERLIFE_SAMPLES=<dir> npm test` | The same over any folder of `.xsn` files |
 | `npm run dev` | Admin page at `http://127.0.0.1:4340` with an in-memory stand-in for Jira |
 | `npm run build` | Builds the admin page into `static/admin` |

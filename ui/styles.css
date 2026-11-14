@@ -194,9 +194,26 @@ button.sort:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px
 .field { display: grid; gap: 4px; }
 .field > :first-child { display: flex; align-items: center; min-height: 24px; font-size: 12px; font-weight: 600; color: var(--subtle); }
 .field select { min-width: 260px; max-width: 100%; }
-.made { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.made button.link { padding: 2px 8px; border-radius: 3px; background: var(--success); color: var(--success-text); font-size: 12px; font-weight: 600; }
-.made button.link:hover { background: var(--success); }
+.made { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; }
+.made li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; min-height: 32px; }
+.made .where { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 3px; background: var(--success); color: var(--success-text); font-size: 12px; font-weight: 600; }
+.made .where.waiting { background: var(--warning); color: var(--warning-text); }
+.pair { display: inline-flex; align-items: center; gap: 4px; }
+.next-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 12px; padding: 8px 8px 8px 16px; border-radius: 4px; background: var(--warning); }
+.next-step > .icon { flex: none; color: var(--warning-text); }
+.next-step > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.next-step > .icon-btn { margin-left: auto; }
+input.shown-link { width: min(100%, 420px); font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface, #fff); color: var(--text); }
+.records { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; color: var(--subtle); }
+
+.bulk { border: 1px solid var(--focus); border-radius: 8px; background: var(--selected); padding: 12px 16px; margin-bottom: 12px; }
+.bulk .fields { align-items: center; }
+.bulk .fields > .icon-btn { margin-left: auto; }
+.bulk p { margin: 8px 0 0; }
+.bulk select { min-width: 220px; max-width: 100%; }
+td.pick { width: 36px; padding-right: 0; cursor: default; }
+td.pick input { width: 16px; height: 16px; margin: 0; vertical-align: middle; cursor: pointer; accent-color: var(--focus); }
+table.plan td .pair .icon-btn { width: 28px; min-height: 28px; height: 28px; }
 
 .callout { border-radius: 4px; padding: 12px 16px; margin: 12px 0; background: var(--warning); }
 .callout.success { background: var(--success); }

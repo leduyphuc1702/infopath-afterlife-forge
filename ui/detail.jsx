@@ -5,8 +5,8 @@ import { words } from './ask.js';
 import { open } from './bridge.js';
 import { Icon } from './icons.jsx';
 import { ask } from './jira.js';
-import { ConfirmButton, dayWords, Hint, IconButton, Lozenge, plural, statusTone, waveTone } from './parts.jsx';
-import { CAUSE_WORDS, WAVE_SHORT, WAVE_WORDS } from './words.js';
+import { ConfirmButton, CopyLink, dayWords, groupsPage, Hint, IconButton, isLive, isWaiting, Lozenge, plural, portalPath, statusTone, useReturn, waveTone } from './parts.jsx';
+import { CAUSE_WORDS, groupStep, VIEWER, WAVE_SHORT, WAVE_WORDS } from './words.js';
 
 /** Evidence that says the same thing is shown once; where each was found goes in the tooltip. */
 function proofs(evidence) {
@@ -96,9 +96,10 @@ function FieldMap({ form }) {
 
 const NO_TYPES = { status: 'idle', list: [] };
 
-function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated }) {
+function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated, onCheck }) {
   const [types, setTypes] = useState(NO_TYPES);
-  const [type, setType] = useState('');
+  // 'new' makes a request type named after the form; '' saves the form without one.
+  const [type, setType] = useState('new');
   const [round, setRound] = useState(0);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -108,7 +109,7 @@ function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated }) {
   const desk = desks.some((d) => d.id === deskId) ? deskId : desks.length === 1 ? desks[0].id : '';
 
   useEffect(() => {
-    setType('');
+    setType('new');
     if (!desk) {
       setTypes(NO_TYPES);
       return undefined;
@@ -122,8 +123,10 @@ function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated }) {
   }, [desk, round]);
 
   const target = desks.find((d) => d.id === desk);
-  const chosen = types.list.find((t) => t.id === type);
   const earlier = target ? form.created.filter((c) => c.projectKey === target.projectKey) : [];
+  // What was just created, as Jira has it now: it may have been given its portal group since.
+  const made = result?.ok ? (form.created.find((c) => c.formId === result.formId) ?? result) : null;
+  const waiting = Boolean(made && isWaiting(made));
   const create = async () => {
     setBusy(true);
     setResult(null);
@@ -131,10 +134,10 @@ function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated }) {
       const r = await ask('createForm', {
         id: form.id,
         projectKey: target.projectKey,
-        ...(type && { requestTypeId: type }),
+        ...(type === 'new' ? { newRequestType: true } : type && { requestTypeId: type }),
         ...(earlier.length > 0 && { again: true }),
       });
-      setResult({ ...r, portalId: chosen?.portalId, requestTypeName: chosen?.name });
+      setResult(r);
       setRound((n) => n + 1);
       onCreated();
     } catch (e) {
@@ -156,6 +159,32 @@ function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated }) {
       {targets?.desks && desks.length === 0 && (
         <p>This site has no service project yet. Create one in Jira Service Management, then reload this page.</p>
       )}
+      {form.created.length > 0 && !result?.ok && (
+        <ul className="made" aria-label="JSM forms created from this form">
+          {form.created.map((c) => (
+            <li key={c.formId}>
+              <span className={isWaiting(c) ? 'where waiting' : 'where'} data-tip={`Created on ${dayWords(c.when)}`}>
+                <Icon name={isWaiting(c) ? 'warning' : 'check'} size={12} /><span className="sr-only">{isWaiting(c) ? 'Waiting for a portal group in ' : 'Created in '}</span>{c.projectKey}{c.requestTypeName ? ` · ${c.requestTypeName}` : ''}
+              </span>
+              {isLive(c) ? (
+                <span className="pair">
+                  <button className="link" onClick={() => open(portalPath(c))}>Open in the portal<Icon name="external" size={12} /></button>
+                  <CopyLink path={portalPath(c)} />
+                </span>
+              ) : isWaiting(c) ? (
+                <span className="pair">
+                  <button className="link" onClick={() => open(groupsPage(c.projectKey))}>Add it to a portal group<Icon name="external" size={12} /></button>
+                  <Hint>{groupStep(c.requestTypeName)}</Hint>
+                  <IconButton icon="refresh" label="Check again" onClick={onCheck} />
+                </span>
+              ) : (
+                <span className="subtle">Not in the portal</span>
+              )}
+              <button className="link" onClick={() => open(`/jira/servicedesk/projects/${c.projectKey}/settings/forms`)}>Project forms<Icon name="external" size={12} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
       {desks.length > 0 && (
         <div className="fields">
           <div className="field">
@@ -168,20 +197,22 @@ function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated }) {
           <div className="field">
             <span>
               <label htmlFor="create-type">Request type</label>
-              <Hint>Pick a request type to show the form in your customer portal. Without one, the form is saved in the project only. A request type holds one form.</Hint>
+              <Hint>A request type is what people pick in your customer portal. A new one is named after the form; add it to a portal group in Jira and it is live, with a link to send to people. Or pick one you already have: its form is live at once when it is in a portal group. A request type holds one form. Without a request type, the form is saved in the project only.</Hint>
             </span>
-            <select id="create-type" value={type} onChange={(e) => setType(e.target.value)} disabled={types.status !== 'ready' || busy}>
-              <option value="">{types.status === 'loading' ? 'Loading…' : 'None: save as a form only'}</option>
-              {types.list.map((t) => <option key={t.id} value={t.id} disabled={t.hasForm}>{t.name}{t.hasForm ? ' (already has a form)' : ''}</option>)}
+            <select id="create-type" value={type} onChange={(e) => setType(e.target.value)} disabled={!target || busy}>
+              <option value="new">New request type: “{form.name}”</option>
+              {types.status === 'loading' && <option disabled>Loading the request types…</option>}
+              {types.list.map((t) => <option key={t.id} value={t.id} disabled={t.hasForm}>{t.name}{t.hasForm ? ' (already has a form)' : t.hidden ? ' (hidden from the portal)' : ''}</option>)}
+              <option value="">None: save as a form only</option>
             </select>
           </div>
-          <button className={earlier.length > 0 ? undefined : 'primary'} disabled={!target || busy || types.status === 'loading'} onClick={create}>
+          <button className={earlier.length > 0 ? undefined : 'primary'} disabled={!target || busy} onClick={create}>
             <Icon name="plus" />{busy ? 'Creating…' : earlier.length > 0 ? 'Create another copy' : 'Create JSM form'}
           </button>
         </div>
       )}
       {types.status === 'error' && (
-        <p className="error" role="alert">{types.error} The form can still be created without a request type. <button className="link" onClick={() => setRound((n) => n + 1)}>Try again</button></p>
+        <p className="error" role="alert">{types.error} The form can still be created on a new request type. <button className="link" onClick={() => setRound((n) => n + 1)}>Try again</button></p>
       )}
       {earlier.length > 0 && !busy && !result?.ok && (
         <p className="warn"><Icon name="warning" />Already in {target.projectKey} since {dayWords(earlier[0].when)}. Creating it again adds a second copy.</p>
@@ -189,34 +220,41 @@ function Create({ form, targets, deskId, onDesk, onRetryTargets, onCreated }) {
       <div aria-live="polite">
         {busy && <p className="sr-only">Jira is building the form. This takes a few seconds.</p>}
         {result?.ok && (
-          <div className="callout success">
-            <b><Icon name="check" />“{result.name}” is now a JSM form in {result.projectKey}</b>
+          <div className={waiting ? 'callout' : 'callout success'}>
+            <b>
+              <Icon name={waiting ? 'warning' : 'check'} />
+              “{result.name}” is {waiting ? `created in ${result.projectKey}. One step left` : isLive(made) ? `live in the ${result.projectKey} portal` : `now a JSM form in ${result.projectKey}`}
+            </b>
             <p>
-              {plural(result.questions, 'question')}{result.requestTypeName ? `, shown in the portal on “${result.requestTypeName}”` : ''}.
+              {plural(result.questions, 'question')}{result.requestTypeName ? `, on the ${result.newRequestType ? 'new ' : ''}request type “${result.requestTypeName}”` : ''}.
               {form.attention.length > 0 ? ' Go through “Needs your attention” below before customers use it.' : ''}
             </p>
             <p className="actions">
-              {result.portalId && <button className="link" onClick={() => open(`/servicedesk/customer/portal/${result.portalId}/create/${result.requestTypeId}`)}>Open it in the portal<Icon name="external" size={12} /></button>}
+              {waiting && (
+                <span className="pair">
+                  <button className="primary" onClick={() => open(groupsPage(result.projectKey))}>Add it to a portal group<Icon name="external" size={12} /></button>
+                  <Hint>{`${groupStep(result.requestTypeName)}${result.workType ? ` The request type uses the work type “${result.workType}”. For another work type, make the request type in Jira and pick it here.` : ''}`}</Hint>
+                  <IconButton icon="refresh" label="Check again" onClick={onCheck} />
+                </span>
+              )}
+              {waiting && (
+                <span className="pair">
+                  <button className="link" onClick={() => open(result.portalPath)}>Preview the form<Icon name="external" size={12} /></button>
+                  <Hint>Opens the form as people will see it. Jira takes what they send once the request type is in a portal group.</Hint>
+                </span>
+              )}
+              {!waiting && isLive(made) && (
+                <span className="pair">
+                  <button className="link" onClick={() => open(result.portalPath)}>Open it in the portal<Icon name="external" size={12} /></button>
+                  <CopyLink path={result.portalPath} />
+                </span>
+              )}
               <button className="link" onClick={() => open(result.formsPage)}>Open the project’s forms<Icon name="external" size={12} /></button>
             </p>
           </div>
         )}
         {result && !result.ok && <div className="callout danger" role="alert"><b>The form was not created</b><p>{result.error}</p></div>}
       </div>
-      {form.created.length > 0 && !result?.ok && (
-        <ul className="made" aria-label="JSM forms created from this form">
-          {form.created.map((c) => (
-            <li key={c.formId}>
-              <button
-                className="link" data-tip={`Created on ${dayWords(c.when)}${c.requestTypeId ? ', shown in the portal' : ''}. Opens the project’s forms.`}
-                onClick={() => open(`/jira/servicedesk/projects/${c.projectKey}/settings/forms`)}
-              >
-                <Icon name="check" size={12} /><span className="sr-only">Created in </span>{c.projectKey}<Icon name="external" size={12} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
   );
 }
@@ -235,6 +273,8 @@ export function Detail({ id, targets, deskId, onDesk, onRetryTargets, onChanged,
     }
   }, [id]);
   useEffect(() => { load(); }, [load]);
+  // Back from Jira's portal settings: what was waiting for a portal group may be live now.
+  useReturn(Boolean(form?.created.some(isWaiting)), load);
   const heading = useRef(null);
   useEffect(() => {
     if (!form) return;
@@ -279,7 +319,16 @@ export function Detail({ id, targets, deskId, onDesk, onRetryTargets, onChanged,
           <IconButton icon="close" label="Close" onClick={onClose} />
         </div>
       </header>
-      <Create form={form} targets={targets} deskId={deskId} onDesk={onDesk} onRetryTargets={onRetryTargets} onCreated={() => { load(); onChanged(); }} />
+      <Create form={form} targets={targets} deskId={deskId} onDesk={onDesk} onRetryTargets={onRetryTargets} onCreated={() => { load(); onChanged(); }} onCheck={load} />
+      {form.records > 0 && (
+        <p className="records">
+          <span>{plural(form.records, 'filled record')} of this form {form.records === 1 ? 'stays in its file' : 'stay in their files'}.</span>
+          <span className="pair">
+            <button className="link" onClick={() => open(VIEWER)}>Read them in the free viewer<Icon name="external" size={12} /></button>
+            <Hint>Jira Service Management takes the new requests from now on. The old .xml records are not imported: the InfoPath Afterlife web viewer opens them in a browser, beside their form, without uploading them.</Hint>
+          </span>
+        </p>
+      )}
       <Certificate form={form} />
       <FieldMap form={form} />
     </article>

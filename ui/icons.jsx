@@ -10,12 +10,14 @@ const SHAPES = {
   check: <path d="M3.5 8.3 6.6 11.2 12.5 4.8" />,
   arrow: <path d="M3 8h9.5M9 4.5 12.5 8 9 11.5" />,
   external: <path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5" />,
+  copy: <><rect x="5.5" y="5.5" width="8" height="8" rx="1" /><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" /></>,
   search: <><circle cx="7" cy="7" r="4" /><path d="M10 10l3.2 3.2" /></>,
   flask: <path d="M6.5 2.5h3M7 2.5v3.8L3.6 12a1 1 0 0 0 .9 1.5h7a1 1 0 0 0 .9-1.5L9 6.3V2.5M5.3 10h5.4" />,
   swap: <path d="M3 5.5h9.5M10 3l2.5 2.5L10 8M13 10.5H3.5M6 8l-2.5 2.5L6 13" />,
   sliders: <><path d="M2.5 5h5M11.5 5h2M2.5 11h2M8.5 11h5" /><circle cx="9.5" cy="5" r="1.8" /><circle cx="6.5" cy="11" r="1.8" /></>,
   help: <><circle cx="8" cy="8" r="6" /><path d="M6.3 6.4a1.8 1.8 0 1 1 2.6 1.6c-.6.3-.9.7-.9 1.3" /><path d="M8 11.4v.1" /></>,
   warning: <><path d="M8 2.5 14 13H2z" /><path d="M8 6.6v3M8 11.3v.1" /></>,
+  refresh: <path d="M13 8a5 5 0 1 1-1.6-3.7M13.2 2.6v2.9h-2.9" />,
 };
 
 export function Icon({ name, size = 16 }) {

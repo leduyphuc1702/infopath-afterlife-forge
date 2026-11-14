@@ -23,7 +23,7 @@ Then, in this folder:
 
 ```
 npm install
-npm test              # 50 tests: conversion, file intake, analysis, backend and actions
+npm test              # 58 tests: conversion, file intake, analysis, backend and actions
 npm run build         # builds the admin page into static/admin
 forge register        # creates your own app id and writes it to manifest.yml
 forge deploy
@@ -41,9 +41,16 @@ regenerates it from a checkout of the engine.
 | `read:jira-work` | Reads forms and whether a request type already has one |
 | `read:jira-user` | Checks that the person creating a form administers the project |
 | `read:servicedesk-request` | Lists service projects and their request types |
-| `manage:jira-project` | Creates the form in the project |
+| `manage:jira-project` | Creates the form in the project, and takes back a request type whose form could not be created |
+| `read:requesttype:jira-service-management` | Needed by Jira for the call below |
+| `write:requesttype:jira-service-management` | Makes the request type a form is shown on |
 
 The app makes no outbound network calls.
+
+**Updating from an earlier version.** The two request-type permissions are new in 1.1.0, so a
+Jira administrator has to approve the update once, under Settings → Apps → Manage apps. Until
+then the app keeps working as before, and a click on **Create JSM form** with a new request
+type answers that the update is waiting and creates nothing.
 
 ## First run
 
@@ -63,12 +70,30 @@ The app makes no outbound network calls.
 3. **Open.** Click **Purchase Request**. The page shows its death certificate (three causes,
    each with the evidence found in the file) and the field map: 13 questions, 8 controls
    converted as they are and 8 simplified.
-4. **Create.** Choose a service project. Optionally choose a request type that has no form
-   yet, to show the form in the customer portal. Press **Create JSM form**. It takes ten to
-   twenty seconds.
-5. Follow **Open it in the portal** if you chose a request type, or **Open the project's
-   forms** to see the new form in Project settings → Forms.
-6. The download icon above the table exports the plan as CSV.
+4. **Create.** Choose a service project and press **Create JSM form**. The app makes a
+   request type named after the form, puts the form on it, and answers "“Purchase Request” is
+   created in …. One step left". It takes a few seconds.
+   - **Add it to a portal group** opens the project's Portal groups page in Jira. Open a
+     group, press **Add request form** and pick "Purchase Request". Jira shows a request type
+     in the portal, and lets people send it, only when it is in a portal group, and gives an
+     app no way to put it there.
+   - Come back to the app's tab. It checks with Jira on its own (the round-arrow icon checks
+     again at any time) and the form turns live: **Open in the portal** shows it as a
+     customer sees it, and the copy icon next to it copies that link, to send to the people
+     who used the InfoPath form.
+   - **Preview the form** opens the form by its link before that step. It can be read there,
+     not sent.
+   - To use a request type you already have, or to keep the form out of the portal, choose it
+     in **Request type** before you press the button. A request type that is in no portal
+     group is marked "hidden from the portal" in that list.
+5. **Create many.** Tick forms in the plan, or the box in the table's header for all of them.
+   Choose the project in the bar that appears and press **Create N JSM forms**. Each form
+   gets its own request type; forms already in that project are left as they are. A line
+   above the plan then says "One step left for N forms", with one button per project that
+   opens its Portal groups page. Add the request types to a group there and come back: each
+   row turns from a "waiting" mark to an open icon and a copy icon for its portal link.
+6. The download icon above the table exports the plan as CSV, with each form's request type,
+   whether it is live or needs a portal group, and its portal link.
 
 To use your own templates, drop `.xsn` files, or a whole folder, anywhere on the page. Add
 filled `.xml` records in the same drop to have them counted per form. Files that are not
@@ -84,8 +109,12 @@ Rovo (the default), or Jira administrators only.
    - "Which InfoPath forms should we migrate first?"
    - "What stops the Expense Report form from working?"
    - "Create the JSM form for Leave Request". The agent lists the service projects you
-     administer and asks which one. Rovo then shows a **Please review** step; the form is
-     created only after you confirm.
+     administer and asks which one. Rovo then shows a **Please review** step; only after you
+     confirm does the app make the request type and the form. The agent says that one step
+     is left, links the project's Portal groups page, and gives the link people will use.
+   - "Where do people fill in the Leave Request form now?" The agent answers with the portal
+     link once the request type is in a portal group. Before that it says the form is not
+     live yet and names the step.
 
 The conversation starters appear in a new chat only. The agent answers only from what the
 admin page saved. With no forms analysed it says so and
@@ -110,6 +139,8 @@ Tools: `list-legacy-forms`, `get-legacy-form` (input `form`), `list-service-proj
 - In the admin page, open a form and press **Remove from the plan** to delete its record.
 - Forms created in a project are ordinary JSM forms: delete them under Project settings →
   Forms.
+- Request types the app made are ordinary request types, named after the form and described
+  as "Replaces the InfoPath form …": delete them under Project settings → Request types.
 - `forge uninstall` removes the app and its storage from the site.
 
 ## Local preview without Jira

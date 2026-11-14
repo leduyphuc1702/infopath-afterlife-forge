@@ -21,6 +21,16 @@ export async function invoke(name, payload) {
   return fn({ payload, context: { accountId: 'dev' } });
 }
 
-export const open = (url) => console.log('open', url);
+// Opening a project's portal groups stands for the step an administrator takes there: every
+// request type of that project that is in no group is put in one.
+export const open = (url) => {
+  console.log('open', url);
+  const m = String(url).match(/\/projects\/([^/]+)\/settings\/portal-settings\/portal-groups$/);
+  const desk = m && forge.state.desks.find((d) => d.projectKey === m[1]);
+  for (const t of (desk && forge.state.requestTypes[desk.id]) || [])
+    if (t.groupIds?.length === 0) forge.addToPortalGroup(desk.id, t.id);
+};
 
 export const enableTheme = () => undefined;
+
+export const siteUrl = async () => 'https://your-site.atlassian.net';

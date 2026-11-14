@@ -10,9 +10,7 @@ modules:
   rovo:agent:
     - key: afterlife-agent
       name: InfoPath Afterlife
-      description: Knows every InfoPath form this site still has to move to Jira
-        Service Management, what stops each one from working, and can create the
-        JSM form.
+      description: Knows every InfoPath form this site still has to move to Jira Service Management, what stops each one from working, and can create its replacement on a new request type.
       icon: resource:admin;icon.svg
       prompt: resource:prompts;agent.md
       conversationStarters:
@@ -52,16 +50,12 @@ modules:
       name: list-legacy-forms
       function: list-legacy-forms-fn
       actionVerb: GET
-      description: Lists every analysed InfoPath form with its migration wave, size,
-        causes of death and whether a JSM form was already created. Use it for
-        questions about the migration plan or the order of work.
+      description: Lists every analysed InfoPath form with its migration wave, size, causes of death, and whether its JSM form is created, live in the portal or waiting for a portal group. Use it for questions about the migration plan or the order of work.
     - key: get-legacy-form
       name: get-legacy-form
       function: get-legacy-form-fn
       actionVerb: GET
-      description: Returns the death certificate and the field-by-field conversion map
-        of one InfoPath form. Use it for questions about a single form, its
-        fields, rules, data connections or what needs manual work.
+      description: Returns one InfoPath form's death certificate, its field-by-field conversion map and, for each JSM form made from it, the portal link and whether it is live. Use it for questions about one form, what needs manual work, or where people fill it in now.
       inputs:
         form:
           title: Form
@@ -80,9 +74,7 @@ modules:
       name: create-jsm-form
       function: create-jsm-form-fn
       actionVerb: CREATE
-      description: Creates the Jira Service Management form for one analysed InfoPath
-        form in a service project. Only when the user asks to create or convert
-        a form and has chosen the project.
+      description: Replaces one analysed InfoPath form. Makes a request type named after it in a service project, puts the JSM form on it, returns the portal link and the step left before it is live. Only when the user asks to create or replace a form and names a project.
       inputs:
         form:
           title: Form
@@ -121,6 +113,8 @@ permissions:
     - read:jira-user
     - read:servicedesk-request
     - manage:jira-project
+    - read:requesttype:jira-service-management
+    - write:requesttype:jira-service-management
   content:
     styles:
       - unsafe-inline
